@@ -53,6 +53,7 @@ int main(void)
 	SECKEYPrivateKey *server_private_key;
 	char buf[255];
 	PRInt32 readed;
+	PRSocketOptionData socket_option;
 
 	if (NSS_Init(NSS_DB_DIR) != SECSuccess) {
 		err_nss();
@@ -65,6 +66,12 @@ int main(void)
 	if (socket == NULL) {
 		err_nss();
 	}
+
+	socket_option.option = PR_SockOpt_Reuseaddr;
+	socket_option.value.reuse_addr = PR_TRUE;
+	if (PR_SetSocketOption(socket, &socket_option) != SECSuccess) {
+		err_nss();
+         }
 
 	/*
 	 * Socket is ready, now find addr to bind to
