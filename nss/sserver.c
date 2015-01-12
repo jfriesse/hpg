@@ -15,6 +15,21 @@
 
 #define NSS_DB_DIR	"nssdb"
 
+struct client_item {
+	PRCList list;
+
+	PRFileDesc *socket;
+};
+
+struct server_item {
+	PRFileDesc *socket;
+	CERTCertificate *cert;
+	SECKEYPrivateKey *private_key;
+};
+
+PRCList clients;
+struct server_item server;
+
 static void err_nss(void) {
 	errx(1, "nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
 }
@@ -44,51 +59,27 @@ static char *get_pwd(PK11SlotInfo *slot, PRBool retry, void *arg)
 	return (PL_strdup(pwd));
 }
 
-int main(void)
+void
+accept_connection(void)
 {
-	PRFileDesc *socket;
 	PRNetAddr client_addr;
-	PRFileDesc* client_socket;
-	CERTCertificate *server_cert;
-	SECKEYPrivateKey *server_private_key;
-	char buf[255];
-	PRInt32 readed;
+	PRFileDesc *client_socket;
+	struct client_item *ci;
 
-	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
+	if ((client_socket = PR_Accept(server.socket, &client_addr, PR_INTERVAL_NO_TIMEOUT)) == NULL) {
 		err_nss();
 	}
 
-	socket = nss_sock_create_listen_socket(NULL, 4433, PR_AF_INET6);
-	if (socket == NULL) {
-		err_nss();
-	}
-
-	if (PR_Listen(socket, 10) != PR_SUCCESS) {
-		err_nss();
-	}
-
-	if ((client_socket = PR_Accept(socket, &client_addr, PR_INTERVAL_NO_TIMEOUT)) == NULL) {
-		err_nss();
-	}
-
-	PK11_SetPasswordFunc(get_pwd);
-
-	server_cert =  PK11_FindCertFromNickname("QNetd Cert", NULL);
-	if (!server_cert) {
-		err_nss();
-	}
-
-	server_private_key = PK11_FindKeyByAnyCert(server_cert, NULL);
-	if (server_private_key == NULL) {
-		err_nss();
-	}
-
+	ci = calloc(1, sizeof(*ci));
 	client_socket = SSL_ImportFD(NULL, client_socket);
 	if (client_socket == NULL) {
 		err_nss();
 	}
 
-	if (SSL_ConfigSecureServer(client_socket, server_cert, server_private_key, NSS_FindCertKEAType(server_cert)) != PR_SUCCESS) {
+	if (SSL_ConfigSecureServer(client_socket, 
+	    server.cert,
+	    server.private_key,
+	    NSS_FindCertKEAType(server.cert)) != PR_SUCCESS) {
 		err_nss();
 	}
 
@@ -102,19 +93,152 @@ int main(void)
 		err_nss();
 	}
 
-	while ((readed = PR_Read(client_socket, buf, sizeof(buf))) > 0) {
+	ci->socket = client_socket;
+	PR_APPEND_LINK(&ci->list, &clients);
+}
+
+int
+recv_from_client(PRFileDesc *socket)
+{
+	char buf[255];
+	PRInt32 readed;
+
+	readed = PR_Read(socket, buf, sizeof(buf));
+	if (readed > 0) {
 		buf[readed] = '\0';
-		printf("Readed %u bytes: %s\n", readed, buf);
+		printf("Client %p readed %u bytes: %s\n", socket, readed, buf);
+	}
+
+	if (readed == 0) {
+		printf("Client %p EOF\n", socket);
 	}
 
 	if (readed < 0) {
 		err_nss();
 	}
 
-	PR_Close(client_socket);
-	PR_Close(socket);
-	CERT_DestroyCertificate(server_cert);
-	SECKEY_DestroyPrivateKey(server_private_key);
+	return (readed);
+}
+
+int
+no_clients(void)
+{
+	struct client_item *iter;
+	int res;
+
+	res = 0;
+
+	for (iter = (struct client_item *)PR_LIST_HEAD(&clients);
+	    (void *)iter != (void *)&clients;
+	    iter = (struct client_item *)PR_NEXT_LINK(&iter->list)) {
+		res++;
+	}
+
+	return (res);
+}
+
+void
+main_loop(void)
+{
+	PRPollDesc *pfds;
+	PRInt32 res;
+	struct client_item *iter;
+	int i, j;
+	int no_items;
+
+	no_items = no_clients() + 1;
+
+	pfds = malloc(sizeof(*pfds) * no_items);
+
+	pfds[0].fd = server.socket;
+	pfds[0].in_flags = PR_POLL_READ | PR_POLL_EXCEPT;
+	pfds[0].out_flags = 0;
+
+	for (iter = (struct client_item *)PR_LIST_HEAD(&clients), i = 1;
+	    (void *)iter != (void *)&clients;
+	    iter = (struct client_item *)PR_NEXT_LINK(&iter->list), i++) {
+		pfds[i].fd = iter->socket;
+		pfds[i].in_flags = PR_POLL_READ | PR_POLL_EXCEPT;
+		pfds[i].out_flags = 0;
+	}
+
+	if ((res = PR_Poll(pfds, no_items, PR_INTERVAL_NO_TIMEOUT)) > 0) {
+		for (i = 0; i < no_items; i++) {
+			if (pfds[i].out_flags & PR_POLL_READ) {
+				if (i == 0) {
+					accept_connection();
+				} else {
+					if (recv_from_client(pfds[i].fd) <= 0) {
+						for (iter = (struct client_item *)PR_LIST_HEAD(&clients), j = 1;
+						    j == i;
+						    iter = (struct client_item *)PR_NEXT_LINK(&iter->list), j++) {
+							PR_REMOVE_AND_INIT_LINK(&iter->list);
+							free(iter);
+
+							break ;
+						}
+					}
+				}
+			}
+
+			if (pfds[i].out_flags & PR_POLL_ERR) {
+				fprintf(stderr, "ERR\n");
+			}
+
+			if (pfds[i].out_flags & PR_POLL_NVAL) {
+				fprintf(stderr, "NVAL\n");
+			}
+
+			if (pfds[i].out_flags & PR_POLL_HUP) {
+				fprintf(stderr, "HUP\n");
+			}
+
+			if (pfds[i].out_flags & PR_POLL_EXCEPT) {
+				fprintf(stderr, "EXCEPT\n");
+			}
+		}
+	}
+
+	free(pfds);
+}
+
+int main(void)
+{
+
+	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
+		err_nss();
+	}
+
+	PR_INIT_CLIST(&clients);
+
+	PK11_SetPasswordFunc(get_pwd);
+
+	server.cert =  PK11_FindCertFromNickname("QNetd Cert", NULL);
+	if (server.cert == NULL) {
+		err_nss();
+	}
+
+	server.private_key = PK11_FindKeyByAnyCert(server.cert, NULL);
+	if (server.private_key == NULL) {
+		err_nss();
+	}
+
+	server.socket = nss_sock_create_listen_socket(NULL, 4433, PR_AF_INET6);
+	if (server.socket == NULL) {
+		err_nss();
+	}
+
+	if (PR_Listen(server.socket, 10) != PR_SUCCESS) {
+		err_nss();
+	}
+
+	while (1) {
+		main_loop();
+	}
+
+	PR_Close(server.socket);
+	CERT_DestroyCertificate(server.cert);
+	SECKEY_DestroyPrivateKey(server.private_key);
 
 	if (NSS_Shutdown() != SECSuccess) {
 		err_nss();
