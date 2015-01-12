@@ -1,0 +1,65 @@
+#include <stdio.h>
+
+#include "nss-sock.h"
+
+struct list_item {
+	PRCList list; /* Have to be first item */
+
+	int i;
+};
+
+static PRCList items;
+
+void
+dump_list(void)
+{
+	struct list_item *iter;
+
+	printf("List content:\n");
+	for (iter = PR_LIST_HEAD(&items); iter != &items; iter = PR_NEXT_LINK(&iter->list)) {
+		printf("%u\n", iter->i);
+	}
+}
+
+int
+main(void)
+{
+	int i;
+	struct list_item *item, *item2;
+
+	PR_INIT_CLIST(&items);
+
+	for (i = 0; i < 10; i++) {
+		item = calloc(1, sizeof(*item));
+		item->i = i;
+		PR_APPEND_LINK(&item->list, &items);
+	}
+
+	dump_list();
+
+	/*
+	 * Delete 3rd item
+	 */
+	item = PR_LIST_HEAD(&items);
+	item = PR_NEXT_LINK(&item->list);
+	item = PR_NEXT_LINK(&item->list);
+	item2 = PR_NEXT_LINK(&item->list);
+	PR_REMOVE_AND_INIT_LINK(&item->list);
+	dump_list();
+
+	/*
+	 * And insert it after next item
+	 */
+	PR_INSERT_AFTER(&item->list, &item2->list);
+	dump_list();
+
+	/*
+	 * Empty list
+	 */
+	while (!PR_CLIST_IS_EMPTY(&items)) {
+		item = PR_LIST_HEAD(&items);
+		PR_REMOVE_AND_INIT_LINK(&item->list);
+		free(item);
+	}
+	dump_list();
+}
