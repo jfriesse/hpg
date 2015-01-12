@@ -100,10 +100,12 @@ accept_connection(void)
 int
 recv_from_client(PRFileDesc *socket)
 {
-	char buf[255];
+	char buf[3];
 	PRInt32 readed;
 
-	readed = PR_Read(socket, buf, sizeof(buf));
+	fprintf(stderr, "PR_READ\n");
+	readed = PR_Recv(socket, buf, sizeof(buf), 0, 1000);
+	fprintf(stderr, "-PR_READ\n");
 	if (readed > 0) {
 		buf[readed] = '\0';
 		printf("Client %p readed %u bytes: %s\n", socket, readed, buf);
@@ -113,7 +115,7 @@ recv_from_client(PRFileDesc *socket)
 		printf("Client %p EOF\n", socket);
 	}
 
-	if (readed < 0) {
+	if (readed < 0 && PR_GetError() != PR_IO_TIMEOUT_ERROR) {
 		err_nss();
 	}
 
@@ -165,10 +167,11 @@ main_loop(void)
 	if ((res = PR_Poll(pfds, no_items, PR_INTERVAL_NO_TIMEOUT)) > 0) {
 		for (i = 0; i < no_items; i++) {
 			if (pfds[i].out_flags & PR_POLL_READ) {
+				fprintf(stderr, "Read %u\n", i);
 				if (i == 0) {
 					accept_connection();
 				} else {
-					if (recv_from_client(pfds[i].fd) <= 0) {
+					if (recv_from_client(pfds[i].fd) == 0) {
 						for (iter = (struct client_item *)PR_LIST_HEAD(&clients), j = 1;
 						    j == i;
 						    iter = (struct client_item *)PR_NEXT_LINK(&iter->list), j++) {
