@@ -62,11 +62,20 @@ static char *get_pwd(PK11SlotInfo *slot, PRBool retry, void *arg)
 void
 accept_connection(void)
 {
+//	char buf[255];
 	PRNetAddr client_addr;
 	PRFileDesc *client_socket;
 	struct client_item *ci;
+	PRSocketOptionData sock_opt;
 
 	if ((client_socket = PR_Accept(server.socket, &client_addr, PR_INTERVAL_NO_TIMEOUT)) == NULL) {
+		err_nss();
+	}
+
+	memset(&sock_opt, 0, sizeof(sock_opt));
+	sock_opt.option = PR_SockOpt_Nonblocking;
+	sock_opt.value.non_blocking = PR_TRUE;
+	if (PR_SetSocketOption(client_socket, &sock_opt) != SECSuccess) {
 		err_nss();
 	}
 
@@ -95,16 +104,20 @@ accept_connection(void)
 
 	ci->socket = client_socket;
 	PR_APPEND_LINK(&ci->list, &clients);
+
+/*	fprintf(stderr, "PR_READ2\n");
+	PR_Recv(client_socket, buf, 0, 0, 0);
+	fprintf(stderr, "-PR_READ2\n");*/
 }
 
 int
 recv_from_client(PRFileDesc *socket)
 {
-	char buf[3];
+	char buf[255];
 	PRInt32 readed;
 
 	fprintf(stderr, "PR_READ\n");
-	readed = PR_Recv(socket, buf, sizeof(buf), 0, 1000);
+	readed = PR_Recv(socket, buf, sizeof(buf), 0, 0);
 	fprintf(stderr, "-PR_READ\n");
 	if (readed > 0) {
 		buf[readed] = '\0';
@@ -115,7 +128,11 @@ recv_from_client(PRFileDesc *socket)
 		printf("Client %p EOF\n", socket);
 	}
 
-	if (readed < 0 && PR_GetError() != PR_IO_TIMEOUT_ERROR) {
+	if (readed < 0 && PR_GetError() == PR_WOULD_BLOCK_ERROR) {
+		fprintf(stderr, "WOULD BLOCK\n");
+	}
+
+	if (readed < 0 && PR_GetError() != PR_IO_TIMEOUT_ERROR && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
 		err_nss();
 	}
 
@@ -207,6 +224,7 @@ main_loop(void)
 
 int main(void)
 {
+	PRSocketOptionData sock_opt;
 
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		err_nss();
@@ -228,6 +246,14 @@ int main(void)
 
 	server.socket = nss_sock_create_listen_socket(NULL, 4433, PR_AF_INET6);
 	if (server.socket == NULL) {
+		err_nss();
+	}
+
+
+	memset(&sock_opt, 0, sizeof(sock_opt));
+	sock_opt.option = PR_SockOpt_Nonblocking;
+	sock_opt.value.non_blocking = PR_TRUE;
+	if (PR_SetSocketOption(server.socket, &sock_opt) != SECSuccess) {
 		err_nss();
 	}
 
