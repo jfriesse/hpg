@@ -141,3 +141,55 @@ nss_sock_create_listen_socket(const char *hostname, uint16_t port, PRIntn af)
 
 	return (socket);
 }
+
+/*
+ * Create listen socket and bind it to address. hostname can be NULL and then
+ * any address is used. Address family (af) can be ether PR_AF_UNSPEC or
+ * PR_AF_INET.
+ */
+PRFileDesc *
+nss_sock_create_client_socket(const char *hostname, uint16_t port, PRIntn af, PRIntervalTime timeout)
+{
+	PRNetAddr addr;
+	PRFileDesc *socket;
+	PRAddrInfo *addr_info;
+	void *addr_iter;
+	PRStatus res;
+	int connect_failed;
+
+	socket = NULL;
+	connect_failed = 0;
+
+	addr_info = PR_GetAddrInfoByName(hostname, af, PR_AI_ADDRCONFIG);
+	if (addr_info == NULL) {
+		return (NULL);
+	}
+
+	addr_iter = NULL;
+
+	while ((addr_iter = PR_EnumerateAddrInfo(addr_iter, addr_info, port, &addr)) != NULL) {
+		socket = nss_sock_create_socket(addr.raw.family, 0);
+		if (socket == NULL) {
+			continue ;
+		}
+
+		if ((res = PR_Connect(socket, &addr, timeout)) != SECSuccess) {
+			PR_Close(socket);
+			socket = NULL;
+			connect_failed = 1;
+		}
+
+		/*
+		 * Connection attempt finished
+		 */
+		break ;
+	}
+
+	PR_FreeAddrInfo(addr_info);
+
+	if (socket == NULL && !connect_failed) {
+		PR_SetError(PR_ADDRESS_NOT_AVAILABLE_ERROR, 0);
+	}
+
+	return (socket);
+}
