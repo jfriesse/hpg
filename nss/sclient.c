@@ -217,12 +217,16 @@ int main(void)
 
 	PK11_SetPasswordFunc(get_pwd);
 
-	client_socket = nss_sock_create_client_socket("127.0.0.1", 4433, PR_AF_UNSPEC, 100);
+	client_socket = nss_sock_create_client_socket("localhost", 4433, PR_AF_UNSPEC, 100);
 	if (client_socket == NULL) {
 		err_nss();
 	}
 
 	client_socket = SSL_ImportFD(NULL, client_socket);
+
+	if (SSL_SetURL(client_socket, "Qnetd Server") != SECSuccess) {
+		err_nss();
+	}
 
 	if ((SSL_OptionSet(client_socket, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
 	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_SERVER, PR_FALSE) != SECSuccess) ||
