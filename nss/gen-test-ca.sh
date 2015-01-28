@@ -5,7 +5,13 @@ create_new_pwd_file() {
 
     if [ ! -e "$pwd_file" ];then
         echo "Creating new $2 file $pwd_file"
-        (ps -elf; date; w) | sha1sum | (read sha_sum rest; echo $sha_sum) > "$pwd_file"
+
+        if [ "$2" == "password" ] && ! $GENERATE_RANDOM_DB_PASS;then
+            echo -n "$DB_PASS" > "$pwd_file"
+        else
+            (ps -elf; date; w) | sha1sum | (read sha_sum rest; echo $sha_sum) > "$pwd_file"
+        fi
+
         chown root:root "$pwd_file"
         chmod 400 "$pwd_file"
     else
@@ -26,6 +32,27 @@ get_serial_no() {
 }
 
 DB_DIR=nssdb
+GENERATE_RANDOM_DB_PASS=true
+DB_PASS=""
+
+while getopts ":p:" opt; do
+    case $opt in
+        p)
+            DB_PASS="$OPTARG"
+            GENERATE_RANDOM_DB_PASS=false
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument." >&2
+            exit 1
+            ;;
+   esac
+done
+
+shift $((OPTIND-1))
 
 if [ "$1" != "" ];then
     DB_DIR="$1"
