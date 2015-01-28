@@ -62,20 +62,15 @@ static char *get_pwd(PK11SlotInfo *slot, PRBool retry, void *arg)
 void
 accept_connection(void)
 {
-//	char buf[255];
 	PRNetAddr client_addr;
 	PRFileDesc *client_socket;
 	struct client_item *ci;
-	PRSocketOptionData sock_opt;
 
 	if ((client_socket = PR_Accept(server.socket, &client_addr, PR_INTERVAL_NO_TIMEOUT)) == NULL) {
 		err_nss();
 	}
 
-	memset(&sock_opt, 0, sizeof(sock_opt));
-	sock_opt.option = PR_SockOpt_Nonblocking;
-	sock_opt.value.non_blocking = PR_TRUE;
-	if (PR_SetSocketOption(client_socket, &sock_opt) != SECSuccess) {
+	if (nss_sock_set_nonblocking(client_socket) != 0) {
 		err_nss();
 	}
 
@@ -104,10 +99,6 @@ accept_connection(void)
 
 	ci->socket = client_socket;
 	PR_APPEND_LINK(&ci->list, &clients);
-
-/*	fprintf(stderr, "PR_READ2\n");
-	PR_Recv(client_socket, buf, 0, 0, 0);
-	fprintf(stderr, "-PR_READ2\n");*/
 }
 
 int
@@ -224,7 +215,6 @@ main_loop(void)
 
 int main(void)
 {
-	PRSocketOptionData sock_opt;
 
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		err_nss();
@@ -249,11 +239,7 @@ int main(void)
 		err_nss();
 	}
 
-
-	memset(&sock_opt, 0, sizeof(sock_opt));
-	sock_opt.option = PR_SockOpt_Nonblocking;
-	sock_opt.value.non_blocking = PR_TRUE;
-	if (PR_SetSocketOption(server.socket, &sock_opt) != SECSuccess) {
+	if (nss_sock_set_nonblocking(server.socket) != 0) {
 		err_nss();
 	}
 

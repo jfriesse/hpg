@@ -17,6 +17,24 @@ nss_sock_init_nss(char *config_dir)
 }
 
 /*
+ * Set NSS socket non-blocking
+ */
+int
+nss_sock_set_nonblocking(PRFileDesc *sock)
+{
+	PRSocketOptionData sock_opt;
+
+	memset(&sock_opt, 0, sizeof(sock_opt));
+	sock_opt.option = PR_SockOpt_Nonblocking;
+	sock_opt.value.non_blocking = PR_TRUE;
+	if (PR_SetSocketOption(sock, &sock_opt) != SECSuccess) {
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
  * Create TCP socket with af family. If reuse_addr is set, socket option
  * for reuse address is set.
  */
