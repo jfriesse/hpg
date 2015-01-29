@@ -261,9 +261,13 @@ int main(void)
 		main_loop();
 	}*/
 
-	PR_Close(client_socket);
+	if (PR_Close(client_socket) != SECSuccess) {
+		err_nss();
+	}
+
 	/*CERT_DestroyCertificate(server.cert);
 	SECKEY_DestroyPrivateKey(server.private_key);*/
+	SSL_ClearSessionCache();
 
 	if (NSS_Shutdown() != SECSuccess) {
 		err_nss();
