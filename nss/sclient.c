@@ -53,8 +53,8 @@ recv_from_server(PRFileDesc *socket)
 	PRInt32 readed;
 
 	fprintf(stderr, "PR_READ\n");
-	readed = PR_Recv(socket, buf, sizeof(buf), 0, 0);
-	fprintf(stderr, "-PR_READ\n");
+	readed = PR_Recv(socket, buf, sizeof(buf), 0, 1000);
+	fprintf(stderr, "-PR_READ %u\n", readed);
 	if (readed > 0) {
 		buf[readed] = '\0';
 		printf("Client %p readed %u bytes: %s\n", socket, readed, buf);
@@ -167,6 +167,10 @@ int main(void)
 	}
 
 	if (SSL_ResetHandshake(client_socket, PR_FALSE) != SECSuccess) {
+		err_nss();
+	}
+
+	if (SSL_ForceHandshake(client_socket) != SECSuccess) {
 		err_nss();
 	}
 

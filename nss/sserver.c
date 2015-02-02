@@ -88,6 +88,10 @@ accept_connection(void)
 		err_nss();
 	}
 
+/*	if (SSL_ForceHandshake(client_socket) != SECSuccess) {
+		err_nss();
+        }*/
+
 	return (client_socket);
 }
 
