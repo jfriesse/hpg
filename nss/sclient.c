@@ -46,50 +46,8 @@ static char *get_pwd(PK11SlotInfo *slot, PRBool retry, void *arg)
 	return (PL_strdup(pwd));
 }
 
-/*void
-accept_connection(void)
-{
-	PRNetAddr client_addr;
-	PRFileDesc *client_socket;
-	struct client_item *ci;
-
-	if ((client_socket = PR_Accept(server.socket, &client_addr, PR_INTERVAL_NO_TIMEOUT)) == NULL) {
-		err_nss();
-	}
-
-	if (nss_sock_set_nonblocking(client_socket) != 0) {
-		err_nss();
-	}
-
-	ci = calloc(1, sizeof(*ci));
-	client_socket = SSL_ImportFD(NULL, client_socket);
-	if (client_socket == NULL) {
-		err_nss();
-	}
-
-	if (SSL_ConfigSecureServer(client_socket,
-	    server.cert,
-	    server.private_key,
-	    NSS_FindCertKEAType(server.cert)) != PR_SUCCESS) {
-		err_nss();
-	}
-
-	if ((SSL_OptionSet(client_socket, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
-	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_SERVER, PR_TRUE) != SECSuccess) ||
-	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_CLIENT, PR_FALSE) != SECSuccess)) {
-		err_nss();
-	}
-
-	if (SSL_ResetHandshake(client_socket, PR_TRUE) != SECSuccess) {
-		err_nss();
-	}
-
-	ci->socket = client_socket;
-	PR_APPEND_LINK(&ci->list, &clients);
-}
-
 int
-recv_from_client(PRFileDesc *socket)
+recv_from_server(PRFileDesc *socket)
 {
 	char buf[255];
 	PRInt32 readed;
@@ -117,89 +75,63 @@ recv_from_client(PRFileDesc *socket)
 	return (readed);
 }
 
-int
-no_clients(void)
-{
-	struct client_item *iter;
-	int res;
-
-	res = 0;
-
-	for (iter = (struct client_item *)PR_LIST_HEAD(&clients);
-	    (void *)iter != (void *)&clients;
-	    iter = (struct client_item *)PR_NEXT_LINK(&iter->list)) {
-		res++;
-	}
-
-	return (res);
-}
-
 void
-main_loop(void)
+handle_client(PRFileDesc *socket)
 {
-	PRPollDesc *pfds;
+	PRPollDesc pfds[2];
 	PRInt32 res;
-	struct client_item *iter;
-	int i, j;
-	int no_items;
+	int exit_loop;
+	char to_send[255];
+	PRInt32 sent;
 
-	no_items = no_clients() + 1;
+	exit_loop = 0;
 
-	pfds = malloc(sizeof(*pfds) * no_items);
+	while (!exit_loop) {
+		fprintf(stderr,"Handle client loop\n");
+		pfds[0].fd = PR_STDIN;
+		pfds[0].in_flags = PR_POLL_READ | PR_POLL_EXCEPT;
+		pfds[0].out_flags = 0;
+		pfds[1].fd = socket;
+		pfds[1].in_flags = PR_POLL_READ | PR_POLL_EXCEPT;
+		pfds[1].out_flags = 0;
 
-	pfds[0].fd = server.socket;
-	pfds[0].in_flags = PR_POLL_READ | PR_POLL_EXCEPT;
-	pfds[0].out_flags = 0;
+		if ((res = PR_Poll(pfds, 2, PR_INTERVAL_NO_TIMEOUT)) > 0) {
+			if (pfds[0].out_flags & PR_POLL_READ) {
+				if (fgets(to_send, sizeof(to_send), stdin) == NULL) {
+					exit_loop = 1;
+					break;
+				}
 
-	for (iter = (struct client_item *)PR_LIST_HEAD(&clients), i = 1;
-	    (void *)iter != (void *)&clients;
-	    iter = (struct client_item *)PR_NEXT_LINK(&iter->list), i++) {
-		pfds[i].fd = iter->socket;
-		pfds[i].in_flags = PR_POLL_READ | PR_POLL_EXCEPT;
-		pfds[i].out_flags = 0;
-	}
+				if ((sent = PR_Send(socket, to_send, strlen(to_send), 0, PR_INTERVAL_NO_TIMEOUT)) == -1) {
+					err_nss();
+				}
+				fprintf(stderr,"sent = %u\n", sent);
+			}
 
-	if ((res = PR_Poll(pfds, no_items, PR_INTERVAL_NO_TIMEOUT)) > 0) {
-		for (i = 0; i < no_items; i++) {
-			if (pfds[i].out_flags & PR_POLL_READ) {
-				fprintf(stderr, "Read %u\n", i);
-				if (i == 0) {
-					accept_connection();
-				} else {
-					if (recv_from_client(pfds[i].fd) == 0) {
-						for (iter = (struct client_item *)PR_LIST_HEAD(&clients), j = 1;
-						    j == i;
-						    iter = (struct client_item *)PR_NEXT_LINK(&iter->list), j++) {
-							PR_REMOVE_AND_INIT_LINK(&iter->list);
-							free(iter);
-
-							break ;
-						}
-					}
+			if (pfds[1].out_flags & PR_POLL_READ) {
+				if (recv_from_server(pfds[1].fd) == 0) {
+					exit_loop = 1;
 				}
 			}
 
-			if (pfds[i].out_flags & PR_POLL_ERR) {
+			if (pfds[1].out_flags & PR_POLL_ERR) {
 				fprintf(stderr, "ERR\n");
 			}
 
-			if (pfds[i].out_flags & PR_POLL_NVAL) {
+			if (pfds[1].out_flags & PR_POLL_NVAL) {
 				fprintf(stderr, "NVAL\n");
 			}
 
-			if (pfds[i].out_flags & PR_POLL_HUP) {
+			if (pfds[1].out_flags & PR_POLL_HUP) {
 				fprintf(stderr, "HUP\n");
 			}
 
-			if (pfds[i].out_flags & PR_POLL_EXCEPT) {
+			if (pfds[1].out_flags & PR_POLL_EXCEPT) {
 				fprintf(stderr, "EXCEPT\n");
 			}
 		}
 	}
-
-	free(pfds);
 }
-*/
 
 static SECStatus nss_bad_cert_hook(void *arg, PRFileDesc *fd) {
 	err_nss();
@@ -208,8 +140,6 @@ static SECStatus nss_bad_cert_hook(void *arg, PRFileDesc *fd) {
 
 int main(void)
 {
-	char buf[255];
-	PRInt32 readed;
 
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		err_nss();
@@ -240,33 +170,12 @@ int main(void)
 		err_nss();
 	}
 
-
-	fprintf(stderr, "PR_READ\n");
-	readed = PR_Recv(client_socket, buf, sizeof(buf), 0, PR_INTERVAL_NO_TIMEOUT);
-	if (readed > 0) {
-		buf[readed] = '\0';
-		printf("Server %p readed %u bytes: %s\n", socket, readed, buf);
-	}
-	fprintf(stderr, "-PR_READ\n");
-
-/*	if (nss_sock_set_nonblocking(server.socket) != 0) {
-		err_nss();
-	}
-
-	if (PR_Listen(server.socket, 10) != PR_SUCCESS) {
-		err_nss();
-	}
-
-	while (1) {
-		main_loop();
-	}*/
+	handle_client(client_socket);
 
 	if (PR_Close(client_socket) != SECSuccess) {
 		err_nss();
 	}
 
-	/*CERT_DestroyCertificate(server.cert);
-	SECKEY_DestroyPrivateKey(server.private_key);*/
 	SSL_ClearSessionCache();
 
 	if (NSS_Shutdown() != SECSuccess) {
