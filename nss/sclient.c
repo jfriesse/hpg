@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <nss.h>
+#include <secerr.h>
+#include <sslerr.h>
 #include <pk11func.h>
 #include <certt.h>
 #include <ssl.h>
@@ -19,6 +21,10 @@ PRFileDesc *client_socket;
 
 static void err_nss(void) {
 	errx(1, "nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
+}
+
+static void warn_nss(void) {
+	warnx("nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
 }
 
 static char *get_pwd(PK11SlotInfo *slot, PRBool retry, void *arg)
@@ -134,8 +140,16 @@ handle_client(PRFileDesc *socket)
 }
 
 static SECStatus nss_bad_cert_hook(void *arg, PRFileDesc *fd) {
-	err_nss();
-	return SECSuccess;
+	if (PR_GetError() == SEC_ERROR_EXPIRED_CERTIFICATE || PR_GetError() == SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE ||
+	    PR_GetError() == SEC_ERROR_CRL_EXPIRED || PR_GetError() == SEC_ERROR_KRL_EXPIRED ||
+	    PR_GetError() == SSL_ERROR_EXPIRED_CERT_ALERT) {
+		fprintf(stderr, "Expired certificate\n");
+		return SECSuccess;
+	}
+
+	warn_nss();
+
+	return SECFailure;
 }
 
 int main(void)
@@ -160,9 +174,9 @@ int main(void)
 
 	if ((SSL_OptionSet(client_socket, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
 	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_SERVER, PR_FALSE) != SECSuccess) ||
-	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_CLIENT, PR_TRUE) != SECSuccess) ||
-	    (SSL_AuthCertificateHook(client_socket, SSL_AuthCertificate, CERT_GetDefaultCertDB()) != SECSuccess) ||
-	    (SSL_BadCertHook(client_socket, nss_bad_cert_hook, NULL) != SECSuccess)) {
+	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_CLIENT, PR_TRUE) != SECSuccess)/* ||
+/*	    (SSL_AuthCertificateHook(client_socket, SSL_AuthCertificate, CERT_GetDefaultCertDB()) != SECSuccess) ||
+	    (SSL_BadCertHook(client_socket, nss_bad_cert_hook, NULL) != SECSuccess)*/) {
 		err_nss();
 	}
 

@@ -52,6 +52,11 @@ static char *get_pwd(PK11SlotInfo *slot, PRBool retry, void *arg)
 	return (PL_strdup(pwd));
 }
 
+static SECStatus nss_bad_cert_hook(void *arg, PRFileDesc *fd) {
+    err_nss();
+    return SECFailure;
+}
+
 PRFileDesc *
 accept_connection(void)
 {
@@ -62,9 +67,9 @@ accept_connection(void)
 		err_nss();
 	}
 
-	if (nss_sock_set_nonblocking(client_socket) != 0) {
+/*	if (nss_sock_set_nonblocking(client_socket) != 0) {
 		err_nss();
-	}
+	}*/
 
 	client_socket = SSL_ImportFD(NULL, client_socket);
 	if (client_socket == NULL) {
@@ -80,7 +85,9 @@ accept_connection(void)
 
 	if ((SSL_OptionSet(client_socket, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
 	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_SERVER, PR_TRUE) != SECSuccess) ||
-	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_CLIENT, PR_FALSE) != SECSuccess)) {
+	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_CLIENT, PR_FALSE) != SECSuccess) ||
+	    (SSL_AuthCertificateHook(client_socket, SSL_AuthCertificate, CERT_GetDefaultCertDB()) != SECSuccess) ||
+	    (SSL_BadCertHook(client_socket, nss_bad_cert_hook, NULL) != SECSuccess)) {
 		err_nss();
 	}
 
@@ -89,9 +96,14 @@ accept_connection(void)
 	}
 
 /*	if (SSL_ForceHandshake(client_socket) != SECSuccess) {
+	                err_nss();
+	}*/
+
+/*	if (SSL_ForceHandshake(client_socket) != SECSuccess) {
 		err_nss();
         }*/
 
+fprintf(stderr,"RESET HANDSHAKE\n");
 	return (client_socket);
 }
 
@@ -186,6 +198,10 @@ int main(void)
 		err_nss();
 	}
 
+	if (SSL_ConfigServerSessionIDCache (0, 0, 0, NULL) != SECSuccess) {
+		err_nss();
+	}
+
 	PK11_SetPasswordFunc(get_pwd);
 
 	server.cert =  PK11_FindCertFromNickname("QNetd Cert", NULL);
@@ -207,16 +223,21 @@ int main(void)
 		err_nss();
 	}
 
-	while (1) {
+/*	while (1) {*/
 		fprintf(stderr,"Accept connection\n");
 		client_socket = accept_connection();
 
 		handle_client(client_socket);
-	}
+		PR_Close(client_socket);
+/*	}*/
 
 	PR_Close(server.socket);
 	CERT_DestroyCertificate(server.cert);
 	SECKEY_DestroyPrivateKey(server.private_key);
+
+/*	SSL_ClearSessionCache();*/
+
+	SSL_ShutdownServerSessionIDCache();
 
 	if (NSS_Shutdown() != SECSuccess) {
 		err_nss();
