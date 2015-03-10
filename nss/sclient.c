@@ -23,8 +23,21 @@ static void err_nss(void) {
 	errx(1, "nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
 }
 
-static void warn_nss(void) {
+/*static void warn_nss(void) {
 	warnx("nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
+}*/
+
+static SECStatus nss_bad_cert_hook(void *arg, PRFileDesc *fd) {
+	if (PR_GetError() == SEC_ERROR_EXPIRED_CERTIFICATE || PR_GetError() == SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE ||
+	    PR_GetError() == SEC_ERROR_CRL_EXPIRED || PR_GetError() == SEC_ERROR_KRL_EXPIRED ||
+	    PR_GetError() == SSL_ERROR_EXPIRED_CERT_ALERT) {
+		fprintf(stderr, "Expired certificate\n");
+		return (SECSuccess);
+	}
+
+//	warn_nss();
+
+	return (SECFailure);
 }
 
 static char *get_pwd(PK11SlotInfo *slot, PRBool retry, void *arg)
@@ -112,6 +125,13 @@ handle_client(PRFileDesc *socket)
 					err_nss();
 				}
 				fprintf(stderr,"sent = %u\n", sent);
+
+				if (strcmp(to_send, "starttls\n") == 0) {
+					if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook)) == NULL) {
+						fprintf(stderr, "AAAAA\n");
+						err_nss();
+					}
+				}
 			}
 
 			if (pfds[1].out_flags & PR_POLL_READ) {
@@ -139,18 +159,6 @@ handle_client(PRFileDesc *socket)
 	}
 }
 
-static SECStatus nss_bad_cert_hook(void *arg, PRFileDesc *fd) {
-	if (PR_GetError() == SEC_ERROR_EXPIRED_CERTIFICATE || PR_GetError() == SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE ||
-	    PR_GetError() == SEC_ERROR_CRL_EXPIRED || PR_GetError() == SEC_ERROR_KRL_EXPIRED ||
-	    PR_GetError() == SSL_ERROR_EXPIRED_CERT_ALERT) {
-		fprintf(stderr, "Expired certificate\n");
-		return SECSuccess;
-	}
-
-	warn_nss();
-
-	return SECFailure;
-}
 
 int main(void)
 {
@@ -163,28 +171,6 @@ int main(void)
 
 	client_socket = nss_sock_create_client_socket("localhost", 4433, PR_AF_UNSPEC, 100);
 	if (client_socket == NULL) {
-		err_nss();
-	}
-
-	client_socket = SSL_ImportFD(NULL, client_socket);
-
-	if (SSL_SetURL(client_socket, "Qnetd Server") != SECSuccess) {
-		err_nss();
-	}
-
-	if ((SSL_OptionSet(client_socket, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
-	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_SERVER, PR_FALSE) != SECSuccess) ||
-	    (SSL_OptionSet(client_socket, SSL_HANDSHAKE_AS_CLIENT, PR_TRUE) != SECSuccess)/* ||
-/*	    (SSL_AuthCertificateHook(client_socket, SSL_AuthCertificate, CERT_GetDefaultCertDB()) != SECSuccess) ||
-	    (SSL_BadCertHook(client_socket, nss_bad_cert_hook, NULL) != SECSuccess)*/) {
-		err_nss();
-	}
-
-	if (SSL_ResetHandshake(client_socket, PR_FALSE) != SECSuccess) {
-		err_nss();
-	}
-
-	if (SSL_ForceHandshake(client_socket) != SECSuccess) {
 		err_nss();
 	}
 

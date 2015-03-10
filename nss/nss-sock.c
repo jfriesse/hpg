@@ -193,3 +193,72 @@ nss_sock_create_client_socket(const char *hostname, uint16_t port, PRIntn af, PR
 
 	return (socket);
 }
+
+/*
+ * Start client side SSL connection. This can block.
+ *
+ * ssl_url is expected server URL, bad_cert_hook is callback called when server certificate
+ * verification fails.
+ */
+PRFileDesc *
+nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBadCertHandler bad_cert_hook)
+{
+	PRFileDesc *ssl_sock;
+
+	ssl_sock = SSL_ImportFD(NULL, input_sock);
+	if (ssl_sock == NULL) {
+		return (NULL);
+	}
+
+	if (SSL_SetURL(ssl_sock, ssl_url) != SECSuccess) {
+		return (NULL);
+	}
+
+	if ((SSL_OptionSet(ssl_sock, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
+	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_SERVER, PR_FALSE) != SECSuccess) ||
+	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_CLIENT, PR_TRUE) != SECSuccess) ||
+	    (SSL_BadCertHook(ssl_sock, bad_cert_hook, NULL) != SECSuccess)) {
+		return (NULL);
+	}
+
+	if (SSL_ResetHandshake(ssl_sock, PR_FALSE) != SECSuccess) {
+		return (NULL);
+	}
+
+	if (SSL_ForceHandshake(ssl_sock) != SECSuccess) {
+		return (NULL);
+	}
+
+	return (ssl_sock);
+}
+
+PRFileDesc *
+nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cert, SECKEYPrivateKey *server_key)
+{
+	PRFileDesc *ssl_sock;
+
+	ssl_sock = SSL_ImportFD(NULL, input_sock);
+	if (ssl_sock == NULL) {
+		return (NULL);
+	}
+
+	if (SSL_ConfigSecureServer(ssl_sock, server_cert, server_key, NSS_FindCertKEAType(server_cert)) != PR_SUCCESS) {
+		return (NULL);
+	}
+
+	if ((SSL_OptionSet(ssl_sock, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
+	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_SERVER, PR_TRUE) != SECSuccess) ||
+	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_CLIENT, PR_FALSE) != SECSuccess)) {
+		return (NULL);
+	}
+
+	if (SSL_ResetHandshake(ssl_sock, PR_TRUE) != SECSuccess) {
+		return (NULL);
+	}
+
+        if (SSL_ForceHandshake(ssl_sock) != SECSuccess) {
+                return (NULL);
+        }
+
+	return (ssl_sock);
+}

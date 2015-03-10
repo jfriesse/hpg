@@ -13,6 +13,12 @@ extern PRFileDesc	*nss_sock_create_listen_socket(const char *hostname, uint16_t 
 extern int		nss_sock_set_nonblocking(PRFileDesc *sock);
 extern PRFileDesc 	*nss_sock_create_client_socket(const char *hostname, uint16_t port, PRIntn af, PRIntervalTime timeout);
 
+extern PRFileDesc	*nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url,
+    SSLBadCertHandler bad_cert_hook);
+
+extern PRFileDesc	*nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cert,
+    SECKEYPrivateKey *server_key);
+
 #ifdef __cplusplus
 }
 #endif
