@@ -1,0 +1,329 @@
+#!/bin/bash
+
+usage() {
+    echo "$0: server_init|node_init"
+    echo
+    echo " -I      Initialize server CA and generate server certificate"
+    echo " -M      Import and sign cluster certificate on qnetd server (needs cluster certificate)"
+    echo " -i      Initialize node CA. Needs CA certificate from server"
+    echo " -r      Generate cluster certificate request"
+    echo " -m      Import cluster certificate on node (needs cluster certificate and cluster key)"
+
+    exit 0
+}
+
+create_new_noise_file() {
+    local noise_file="$1"
+
+    if [ ! -e "$noise_file" ];then
+        echo "Creating new noise file $noise_file"
+
+        (ps -elf; date; w) | sha1sum | (read sha_sum rest; echo $sha_sum) > "$noise_file"
+
+        chown root:root "$noise_file"
+        chmod 400 "$noise_file"
+    else
+        echo "Using existing noise file $noise_file"
+    fi
+}
+
+get_serial_no() {
+    local serial_no
+
+    if ! [ -f "$SERIAL_NO_FILE" ];then
+        echo "100" > $SERIAL_NO_FILE
+    fi
+    serial_no=`cat $SERIAL_NO_FILE`
+    serial_no=$((serial_no+1))
+    echo "$serial_no" > $SERIAL_NO_FILE
+    echo "$serial_no"
+}
+
+init_server_ca() {
+    if [ -f "$DB_DIR/cert8.db" ];then
+        echo "Certificate database already exists. Delete it to continue" >&2
+
+        exit 1
+    fi
+
+    if ! [ -d "$DB_DIR" ];then
+        echo "Creating $DB_DIR"
+        mkdir "$DB_DIR"
+        chown root:root "$DB_DIR"
+        chmod 700 "$DB_DIR"
+    fi
+
+    echo "Creating new key and cert db"
+    echo -n "" > "$PWD_FILE"
+    certutil -N -d "$DB_DIR" -f "$PWD_FILE"
+    chown root:root "$DB_DIR/key3.db" "$DB_DIR/cert8.db" "$DB_DIR/secmod.db"
+    chmod 600 "$DB_DIR/key3.db" "$DB_DIR/cert8.db" "$DB_DIR/secmod.db"
+
+    create_new_noise_file "$NOISE_FILE"
+
+    echo "Creating new CA"
+    # Create self-signed certificate (CA). Asks 3 questions (is this CA, lifetime and critical extension
+    echo -e "y\n0\ny\n" | certutil -S -n "$CA_NICKNAME" -s "$CA_SUBJECT" -x \
+        -t "CT,," -m `get_serial_no` -v $CRT_VALIDITY -d "$DB_DIR" \
+        -z "$NOISE_FILE" -f "$PWD_FILE" -2
+    # Export CA certificate in ascii
+    certutil -L -d "$DB_DIR" -n "$CA_NICKNAME" > "$CA_EXPORT_FILE"
+    certutil -L -d "$DB_DIR" -n "$CA_NICKNAME" -a >> "$CA_EXPORT_FILE"
+
+    certutil -S -n "$SERVER_NICKNAME" -s "$SERVER_SUBJECT" -c "$CA_NICKNAME" -t "u,u,u" -m `get_serial_no` \
+        -v $CRT_VALIDITY -d "$DB_DIR" -z "$NOISE_FILE" -f "$PWD_FILE"
+
+    echo "QNetd CA is exported as $CA_EXPORT_FILE"
+}
+
+init_node_ca() {
+    if [ -f "$DB_DIR/cert8.db" ];then
+        echo "Certificate database already exists. Delete it to continue" >&2
+
+        exit 1
+    fi
+
+    if ! [ -d "$DB_DIR" ];then
+        echo "Creating $DB_DIR"
+        mkdir "$DB_DIR"
+        chown root:root "$DB_DIR"
+        chmod 700 "$DB_DIR"
+    fi
+
+    echo "Creating new key and cert db"
+    echo -n "" > "$PWD_FILE"
+    certutil -N -d "$DB_DIR" -f "$PWD_FILE"
+    chown root:root "$DB_DIR/key3.db" "$DB_DIR/cert8.db" "$DB_DIR/secmod.db"
+    chmod 600 "$DB_DIR/key3.db" "$DB_DIR/cert8.db" "$DB_DIR/secmod.db"
+
+    create_new_noise_file "$NOISE_FILE"
+
+    echo "Importing CA"
+
+    certutil -d "$DB_DIR" -A -t "CT,c,c" -n "$CA_NICKNAME" -f "$PWD_FILE" \
+        -i "$CERTIFICATE_FILE"
+}
+
+gen_cluster_cert_req() {
+    if ! [ -f "$DB_DIR/cert8.db" ];then
+        echo "Certificate database doesn't exists. Use $0 -i to create it" >&2
+
+        exit 1
+    fi
+
+    echo "Creating new certificate request"
+
+    certutil -R -s "CN=$CLUSTER_NAME" -o "$CRQ_FILE" -d "$DB_DIR" -f "$PWD_FILE" -z "$NOISE_FILE"
+
+    echo "Certificate request stored in $CRQ_FILE"
+}
+
+import_cluster_cert() {
+    if ! [ -f "$DB_DIR/cert8.db" ];then
+        echo "Certificate database doesn't exists. Use $0 -i to create it" >&2
+
+        exit 1
+    fi
+
+    echo "Signing cluster certificate"
+    certutil -C -m `get_serial_no` -i "$CERTIFICATE_FILE" -o "$CRT_FILE" -c "$CA_NICKNAME" -d "$DB_DIR"
+
+    echo "Importing cluster certificate"
+    certutil -d "$DB_DIR" -A -t "u,u,u" -n "Cluster-$CLUSTER_NAME" -i "$CRT_FILE"
+
+    echo "Certificate stored in $CRT_FILE"
+
+    certutil -L -d "$DB_DIR" -n "Cluster-$CLUSTER_NAME" > "$CA_EXPORT_FILE.a"
+    certutil -L -d "$DB_DIR" -n "Cluster-$CLUSTER_NAME" -a >> "$CA_EXPORT_FILE.a"
+
+}
+
+DB_DIR=nssdb2
+# Validity of certificate (months)
+CRT_VALIDITY=120
+CA_NICKNAME="QNet CA"
+SERVER_NICKNAME="QNetd Cert"
+CA_SUBJECT="CN=QNet CA"
+SERVER_SUBJECT="CN=Qnetd Server"
+PWD_FILE="$DB_DIR/pwdfile.txt"
+NOISE_FILE="$DB_DIR/noise.txt"
+SERIAL_NO_FILE="$DB_DIR/serial.txt"
+CA_EXPORT_FILE="$DB_DIR/qnetd-cacert.crt"
+CRQ_FILE="$DB_DIR/qnetd-node.crq"
+CRT_FILE="$DB_DIR/qnetd-node.crt"
+
+OPERATION=""
+CERTIFICATE_FILE=""
+CLUSTER_NAME=""
+
+while getopts ":hIiMmrc:n:" opt; do
+    case $opt in
+        r)
+            OPERATION=gen_cluster_cert_req
+            ;;
+        I)
+            OPERATION=init_server_ca
+            ;;
+        i)
+            OPERATION=init_node_ca
+            ;;
+        M)
+            OPERATION=import_cluster_cert
+            ;;
+        m)
+            OPERATION=server_import_cluster_cert
+            ;;
+        n)
+            CLUSTER_NAME="$OPTARG"
+            ;;
+        h)
+            usage
+            ;;
+        c)
+            CERTIFICATE_FILE="$OPTARG"
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+
+            exit 1
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument." >&2
+
+            exit 1
+            ;;
+   esac
+done
+
+case "$OPERATION" in
+    "init_server_ca")
+        init_server_ca
+    ;;
+    "init_node_ca")
+        if ! [ -e "$CERTIFICATE_FILE" ];then
+            echo "Can't open certificate file $CERTIFICATE_FILE" >&2
+
+            exit 2
+        fi
+
+        init_node_ca
+    ;;
+    "gen_cluster_cert_req")
+        if [ "$CLUSTER_NAME" == "" ];then
+            echo "You have to specify cluster name" >&2
+
+            exit 2
+        fi
+
+        gen_cluster_cert_req
+    ;;
+    "import_cluster_cert")
+        if ! [ -e "$CERTIFICATE_FILE" ];then
+            echo "Can't open certificate file $CERTIFICATE_FILE" >&2
+
+            exit 2
+        fi
+
+        if [ "$CLUSTER_NAME" == "" ];then
+            echo "You have to specify cluster name" >&2
+
+            exit 2
+        fi
+
+        CRT_FILE="$DB_DIR/qnetd-cluster-$CLUSTER_NAME.crt"
+        import_cluster_cert
+    ;;
+esac
+
+
+exit 0
+
+
+
+
+DB_DIR=nssdb
+GENERATE_RANDOM_DB_PASS=true
+DB_PASS=""
+
+while getopts ":p:" opt; do
+    case $opt in
+        p)
+            DB_PASS="$OPTARG"
+            GENERATE_RANDOM_DB_PASS=false
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+        :)
+            echo "Option -$OPTARG requires an argument." >&2
+            exit 1
+            ;;
+   esac
+done
+
+shift $((OPTIND-1))
+
+if [ "$1" != "" ];then
+    DB_DIR="$1"
+fi
+
+# Validity of certificate (months)
+CRT_VALIDITY=120
+CA_NICKNAME="QNet CA"
+SERVER_NICKNAME="QNetd Cert"
+CA_SUBJECT="CN=QNet CA"
+SERVER_SUBJECT="CN=Qnetd Server"
+PWD_FILE="$DB_DIR/pwdfile.txt"
+NOISE_FILE="$DB_DIR/noise.txt"
+SERIAL_NO_FILE="$DB_DIR/serial.txt"
+CA_EXPORT_FILE="$DB_DIR/cacert.crt"
+
+create_ca=false
+create_server_crt=false
+
+if [ -f "$DB_DIR/cert8.db" ];then
+    # Database exists. Take a look for CA cert
+    if ! certutil -L -d "$DB_DIR" -n "$CA_NICKNAME" 2>/dev/null >&2; then
+        echo "Creating new CA"
+        create_ca=true
+    else
+        echo "Using existing CA"
+    fi
+    if ! certutil -L -d "$DB_DIR" -n "$SERVER_NICKNAME" 2>/dev/null >&2; then
+        echo "Creating new server certificate"
+        create_server_crt=true
+    else
+        echo "Using existing server certificate"
+    fi
+else
+    create_ca=true
+    create_server_crt=true
+fi
+
+# Create password and noise file if doesn't exists yet
+create_new_pwd_file "$PWD_FILE" "password"
+create_new_pwd_file "$NOISE_FILE" "noise"
+
+if ! [ -f "$DB_DIR/cert8.db" ];then
+    echo "Creating new key and cert db"
+    certutil -N -d "$DB_DIR" -f "$PWD_FILE"
+    chown root:root "$DB_DIR/key3.db" "$DB_DIR/cert8.db" "$DB_DIR/secmod.db"
+    chmod 600 "$DB_DIR/key3.db" "$DB_DIR/cert8.db" "$DB_DIR/secmod.db"
+fi
+
+if $create_ca;then
+    echo "Creating new CA"
+    # Create self-signed certificate (CA). Asks 3 questions (is this CA, lifetime and critical extension
+    echo -e "y\n0\ny\n" | certutil -S -n "$CA_NICKNAME" -s "$CA_SUBJECT" -x \
+        -t "CT,," -m `get_serial_no` -v $CRT_VALIDITY -d "$DB_DIR" \
+        -z "$NOISE_FILE" -f "$PWD_FILE" -2
+    # Export CA certificate in ascii
+    certutil -L -d "$DB_DIR" -n "$CA_NICKNAME" > "$CA_EXPORT_FILE"
+    certutil -L -d "$DB_DIR" -n "$CA_NICKNAME" -a >> "$CA_EXPORT_FILE"
+fi
+
+if $create_server_crt;then
+    certutil -S -n "$SERVER_NICKNAME" -s "$SERVER_SUBJECT" -c "$CA_NICKNAME" -t "u,u,u" -m `get_serial_no` \
+        -v $CRT_VALIDITY -d "$DB_DIR" -z "$NOISE_FILE" -f "$PWD_FILE"
+fi
