@@ -15,9 +15,9 @@
 
 #include "nss-sock.h"
 
-#define NSS_DB_DIR	"nssdb"
+#define NSS_DB_DIR	"node/nssdb"
 
-//#define ENABLE_TLS	1
+#define ENABLE_TLS	1
 
 PRFileDesc *client_socket;
 
@@ -130,7 +130,7 @@ handle_client(PRFileDesc *socket)
 
 #ifdef ENABLE_TLS
 				if (strcmp(to_send, "starttls\n") == 0) {
-					if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook)) == NULL) {
+					if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook, NSS_GetClientAuthData, "Cluster Cert")) == NULL) {
 						fprintf(stderr, "AAAAA\n");
 						err_nss();
 					}
@@ -163,7 +163,6 @@ handle_client(PRFileDesc *socket)
 	}
 }
 
-
 int main(void)
 {
 
@@ -179,7 +178,8 @@ int main(void)
 	}
 
 #ifndef ENABLE_TLS
-	if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook)) == NULL) {
+	if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook,
+	    NSS_GetClientAuthData, "Cluster Cert")) == NULL) {
 		fprintf(stderr, "AAAAA\n");
 		err_nss();
 	}

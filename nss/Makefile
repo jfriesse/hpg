@@ -2,11 +2,11 @@ CFLAGS+=-Wall -ggdb
 
 all: sserver sclient
 
-sserver: sserver.c
+sserver: sserver.c nss-sock.c
 	$(CC) $(CFLAGS) `pkg-config --cflags nspr` `pkg-config --cflags nss` nss-sock.c sserver.c \
 	`pkg-config --libs nspr` `pkg-config --libs nss` -o sserver
 
-sclient: sclient.c
+sclient: sclient.c nss-sock.c
 	$(CC) $(CFLAGS) `pkg-config --cflags nspr` `pkg-config --cflags nss` nss-sock.c sclient.c \
 	`pkg-config --libs nspr` `pkg-config --libs nss` -o sclient
 

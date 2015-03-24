@@ -15,7 +15,7 @@
 
 #define NSS_DB_DIR	"nssdb"
 
-//#define ENABLE_TLS	1
+#define ENABLE_TLS	1
 
 struct server_item {
 	PRFileDesc *socket;
@@ -104,7 +104,7 @@ recv_from_client(PRFileDesc **socket)
 
 #ifdef ENABLE_TLS
 	if (strcmp(buf, "starttls\n") == 0) {
-		*socket = nss_sock_start_ssl_as_server(*socket, server.cert, server.private_key);
+		*socket = nss_sock_start_ssl_as_server(*socket, server.cert, server.private_key, PR_TRUE);
 		if (*socket == NULL) {
 			fprintf(stderr, "AAAA\n");
 			err_nss();
@@ -207,7 +207,7 @@ int main(void)
 		client_socket = accept_connection();
 
 #ifndef ENABLE_TLS
-		client_socket = nss_sock_start_ssl_as_server(client_socket, server.cert, server.private_key);
+		client_socket = nss_sock_start_ssl_as_server(client_socket, server.cert, server.private_key, PR_TRUE);
 		if (*socket == NULL) {
 			fprintf(stderr, "AAAA\n");
 			err_nss();

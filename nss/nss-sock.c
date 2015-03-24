@@ -201,7 +201,8 @@ nss_sock_create_client_socket(const char *hostname, uint16_t port, PRIntn af, PR
  * verification fails.
  */
 PRFileDesc *
-nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBadCertHandler bad_cert_hook)
+nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBadCertHandler bad_cert_hook,
+    SSLGetClientAuthData client_auth_hook, void *client_auth_hook_arg)
 {
 	PRFileDesc *ssl_sock;
 
@@ -217,7 +218,8 @@ nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBad
 	if ((SSL_OptionSet(ssl_sock, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
 	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_SERVER, PR_FALSE) != SECSuccess) ||
 	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_CLIENT, PR_TRUE) != SECSuccess) ||
-	    (SSL_BadCertHook(ssl_sock, bad_cert_hook, NULL) != SECSuccess)) {
+	    (SSL_BadCertHook(ssl_sock, bad_cert_hook, NULL) != SECSuccess) ||
+	    (SSL_GetClientAuthDataHook(ssl_sock, client_auth_hook, client_auth_hook_arg) != SECSuccess)) {
 		return (NULL);
 	}
 
@@ -233,7 +235,8 @@ nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBad
 }
 
 PRFileDesc *
-nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cert, SECKEYPrivateKey *server_key)
+nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cert, SECKEYPrivateKey *server_key,
+    int require_client_cert)
 {
 	PRFileDesc *ssl_sock;
 
@@ -248,7 +251,9 @@ nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cer
 
 	if ((SSL_OptionSet(ssl_sock, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
 	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_SERVER, PR_TRUE) != SECSuccess) ||
-	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_CLIENT, PR_FALSE) != SECSuccess)) {
+	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_CLIENT, PR_FALSE) != SECSuccess) ||
+	    (SSL_OptionSet(ssl_sock, SSL_REQUEST_CERTIFICATE, require_client_cert) != SECSuccess) ||
+	    (SSL_OptionSet(ssl_sock, SSL_REQUIRE_CERTIFICATE, require_client_cert) != SECSuccess)) {
 		return (NULL);
 	}
 
