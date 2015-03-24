@@ -15,7 +15,7 @@
 
 #define NSS_DB_DIR	"nssdb"
 
-#define ENABLE_TLS	1
+//#define ENABLE_TLS	1
 
 struct server_item {
 	PRFileDesc *socket;
@@ -172,6 +172,7 @@ handle_client(PRFileDesc **socket)
 int main(void)
 {
 	PRFileDesc *client_socket;
+	CERTCertificate *peer_cert;
 
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		err_nss();
@@ -211,6 +212,17 @@ int main(void)
 		if (*socket == NULL) {
 			fprintf(stderr, "AAAA\n");
 			err_nss();
+		}
+
+		/*
+		 * Check client certificate
+		 */
+		peer_cert = SSL_PeerCertificate(client_socket);
+		if (peer_cert == NULL) {
+			fprintf(stderr, "No peer cert\n");
+		} else {
+			fprintf(stderr, "Verify peer cert %u\n", CERT_VerifyCertName(peer_cert, "Testcluster"));
+			CERT_DestroyCertificate(peer_cert);
 		}
 #endif
 

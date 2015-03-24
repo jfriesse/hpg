@@ -17,7 +17,7 @@
 
 #define NSS_DB_DIR	"node/nssdb"
 
-#define ENABLE_TLS	1
+//#define ENABLE_TLS	1
 
 PRFileDesc *client_socket;
 
