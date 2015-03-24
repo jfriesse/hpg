@@ -13,7 +13,7 @@ NOISE_FILE="$DB_DIR/noise.txt"
 SERIAL_NO_FILE="$DB_DIR/serial.txt"
 CA_EXPORT_FILE="$DB_DIR/qnetd-cacert.crt"
 CRQ_FILE="$DB_DIR/qnetd-node.crq"
-CRT_FILE="$DB_DIR/qnetd-node.crt"
+CRT_FILE="" # Generated from cluster name
 P12_FILE="$DB_DIR/qnetd-node.p12"
 
 usage() {
@@ -25,7 +25,7 @@ usage() {
     echo " -m      Import cluster certificate on node (needs pk12 certificate)"
     echo ""
     echo " -r      Generate cluster certificate request"
-    echo " -s      Import and sign cluster certificate on qnetd server (needs cluster certificate)"
+    echo " -s      Sign cluster certificate on qnetd server (needs cluster certificate)"
     echo " -M      Import signed cluster certificate and export certificate with key to pk12 file"
     echo ""
     echo " -c certificate      Ether CA, CRQ, CRT or pk12 certificate (operation dependant)"
@@ -163,12 +163,6 @@ sign_cluster_cert() {
 
     echo "Signing cluster certificate"
     certutil -C -m `get_serial_no` -i "$CERTIFICATE_FILE" -o "$CRT_FILE" -c "$CA_NICKNAME" -d "$DB_DIR"
-
-    echo "Importing cluster certificate"
-    certutil -d "$DB_DIR" -A -t "u,u,u" -n "Cluster-$CLUSTER_NAME" -i "$CRT_FILE"
-
-    certutil -L -d "$DB_DIR" -n "Cluster-$CLUSTER_NAME" > "$CRT_FILE"
-    certutil -L -d "$DB_DIR" -n "Cluster-$CLUSTER_NAME" -a >> "$CRT_FILE"
 
     echo "Certificate stored in $CRT_FILE"
 }
