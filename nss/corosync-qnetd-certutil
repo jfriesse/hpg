@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DB_DIR=nssdb2
+DB_DIR=nssdb
 # Validity of certificate (months)
 CRT_VALIDITY=120
 CA_NICKNAME="QNet CA"
@@ -27,7 +27,10 @@ usage() {
     echo " -r      Generate cluster certificate request"
     echo " -s      Import and sign cluster certificate on qnetd server (needs cluster certificate)"
     echo " -M      Import signed cluster certificate and export certificate with key to pk12 file"
-
+    echo ""
+    echo " -c certificate      Ether CA, CRQ, CRT or pk12 certificate (operation dependant)"
+    echo " -n cluster_name     Name of cluster (for -r and -s operations)"
+    echo ""
     echo "Typical usage:"
     echo "- Initialize database on QNetd server by running $0 -I"
     echo "- Copy exported QNetd CA certificate ($CA_EXPORT_FILE) to every node"
