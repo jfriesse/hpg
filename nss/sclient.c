@@ -17,6 +17,8 @@
 
 #define NSS_DB_DIR	"nssdb"
 
+//#define ENABLE_TLS	1
+
 PRFileDesc *client_socket;
 
 static void err_nss(void) {
@@ -126,12 +128,14 @@ handle_client(PRFileDesc *socket)
 				}
 				fprintf(stderr,"sent = %u\n", sent);
 
+#ifdef ENABLE_TLS
 				if (strcmp(to_send, "starttls\n") == 0) {
 					if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook)) == NULL) {
 						fprintf(stderr, "AAAAA\n");
 						err_nss();
 					}
 				}
+#endif
 			}
 
 			if (pfds[1].out_flags & PR_POLL_READ) {
@@ -173,6 +177,13 @@ int main(void)
 	if (client_socket == NULL) {
 		err_nss();
 	}
+
+#ifndef ENABLE_TLS
+	if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook)) == NULL) {
+		fprintf(stderr, "AAAAA\n");
+		err_nss();
+	}
+#endif
 
 	handle_client(client_socket);
 
