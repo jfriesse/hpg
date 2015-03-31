@@ -217,8 +217,14 @@ nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBad
 
 	if ((SSL_OptionSet(ssl_sock, SSL_SECURITY, PR_TRUE) != SECSuccess) ||
 	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_SERVER, PR_FALSE) != SECSuccess) ||
-	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_CLIENT, PR_TRUE) != SECSuccess) ||
-	    (SSL_BadCertHook(ssl_sock, bad_cert_hook, NULL) != SECSuccess) ||
+	    (SSL_OptionSet(ssl_sock, SSL_HANDSHAKE_AS_CLIENT, PR_TRUE) != SECSuccess)) {
+		return (NULL);
+	}
+	if (bad_cert_hook != NULL && SSL_BadCertHook(ssl_sock, bad_cert_hook, NULL) != SECSuccess) {
+		return (NULL);
+	}
+
+	if (client_auth_hook != NULL &&
 	    (SSL_GetClientAuthDataHook(ssl_sock, client_auth_hook, client_auth_hook_arg) != SECSuccess)) {
 		return (NULL);
 	}
