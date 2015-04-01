@@ -6,12 +6,14 @@
 #include <certt.h>
 #include <ssl.h>
 #include <prio.h>
+#include <private/pprio.h>
 #include <prnetdb.h>
 #include <prerror.h>
 #include <prinit.h>
 #include <getopt.h>
 #include <err.h>
 #include <keyhi.h>
+#include <unistd.h>
 
 #include "nss-sock.h"
 
@@ -104,12 +106,17 @@ handle_client(PRFileDesc *socket)
 	int exit_loop;
 	char to_send[255];
 	PRInt32 sent;
+	PRFileDesc *prstdin;
 
 	exit_loop = 0;
 
+	if ((prstdin = PR_CreateSocketPollFd(STDIN_FILENO)) == NULL) {
+		err_nss();
+	}
+
 	while (!exit_loop) {
 		fprintf(stderr,"Handle client loop\n");
-		pfds[0].fd = PR_STDIN;
+		pfds[0].fd = prstdin;
 		pfds[0].in_flags = PR_POLL_READ | PR_POLL_EXCEPT;
 		pfds[0].out_flags = 0;
 		pfds[1].fd = socket;
@@ -160,6 +167,10 @@ handle_client(PRFileDesc *socket)
 				fprintf(stderr, "EXCEPT\n");
 			}
 		}
+	}
+
+	if (PR_DestroySocketPollFd(prstdin) != SECSuccess) {
+		err_nss();
 	}
 }
 
