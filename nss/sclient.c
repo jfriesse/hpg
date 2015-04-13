@@ -19,7 +19,7 @@
 
 #define NSS_DB_DIR	"node/nssdb"
 
-//#define ENABLE_TLS	1
+#define ENABLE_TLS	1
 
 PRFileDesc *client_socket;
 
@@ -98,6 +98,17 @@ recv_from_server(PRFileDesc *socket)
 	return (readed);
 }
 
+SECStatus get_client_auth_data(void *arg,
+    PRFileDesc *socket,
+    struct CERTDistNamesStr *caNames,
+    struct CERTCertificateStr **pRetCert,
+    struct SECKEYPrivateKeyStr **pRetKey)
+{
+    fprintf(stderr, "Client cert requested\n");
+//    sleep(4);
+    return (NSS_GetClientAuthData(arg, socket, caNames, pRetCert, pRetKey));
+}
+
 void
 handle_client(PRFileDesc *socket)
 {
@@ -137,7 +148,7 @@ handle_client(PRFileDesc *socket)
 
 #ifdef ENABLE_TLS
 				if (strcmp(to_send, "starttls\n") == 0) {
-					if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook, NSS_GetClientAuthData, "Cluster Cert")) == NULL) {
+					if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook, /*NSS_GetClientAuthData*/ get_client_auth_data, "Cluster Cert")) == NULL) {
 						fprintf(stderr, "AAAAA\n");
 						err_nss();
 					}
@@ -174,16 +185,6 @@ handle_client(PRFileDesc *socket)
 	}
 }
 
-SECStatus get_client_auth_data(void *arg,
-    PRFileDesc *socket,
-    struct CERTDistNamesStr *caNames,
-    struct CERTCertificateStr **pRetCert,
-    struct SECKEYPrivateKeyStr **pRetKey)
-{
-    fprintf(stderr, "Client cert requested\n");
-
-    return (NSS_GetClientAuthData(arg, socket, caNames, pRetCert, pRetKey));
-}
 
 int main(void)
 {

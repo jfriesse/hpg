@@ -242,9 +242,11 @@ nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBad
 
 PRFileDesc *
 nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cert, SECKEYPrivateKey *server_key,
-    int require_client_cert)
+    int require_client_cert, int *reset_would_block)
 {
 	PRFileDesc *ssl_sock;
+
+	*reset_would_block = 0;
 
 	ssl_sock = SSL_ImportFD(NULL, input_sock);
 	if (ssl_sock == NULL) {
@@ -268,7 +270,14 @@ nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cer
 	}
 
         if (SSL_ForceHandshake(ssl_sock) != SECSuccess) {
-                return (NULL);
+		if (PR_GetError() == PR_WOULD_BLOCK_ERROR) {
+			/*
+			 * Mask would block error.
+			 */
+			*reset_would_block = 1;
+		} else {
+	                return (NULL);
+	        }
         }
 
 	return (ssl_sock);

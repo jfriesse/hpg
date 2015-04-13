@@ -17,7 +17,7 @@ extern PRFileDesc	*nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const ch
     SSLBadCertHandler bad_cert_hook, SSLGetClientAuthData client_auth_hook, void *client_auth_hook_arg);
 
 extern PRFileDesc	*nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cert,
-    SECKEYPrivateKey *server_key, int require_client_cert);
+    SECKEYPrivateKey *server_key, int require_client_cert, int *reset_would_block);
 
 #ifdef __cplusplus
 }

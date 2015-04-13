@@ -78,6 +78,9 @@ recv_from_client(PRFileDesc **socket)
 {
 	char buf[255];
 	PRInt32 readed;
+	PRPollDesc pfd;
+	PRInt32 res;
+	int reset_would_block;
 
 	fprintf(stderr, "PR_READ\n");
 	readed = PR_Recv(*socket, buf, sizeof(buf), 0, 0);
@@ -104,10 +107,27 @@ recv_from_client(PRFileDesc **socket)
 
 #ifdef ENABLE_TLS
 	if (strcmp(buf, "starttls\n") == 0) {
-		*socket = nss_sock_start_ssl_as_server(*socket, server.cert, server.private_key, PR_TRUE);
+		*socket = nss_sock_start_ssl_as_server(*socket, server.cert, server.private_key,
+		    PR_TRUE, &reset_would_block);
 		if (*socket == NULL) {
 			fprintf(stderr, "AAAA\n");
 			err_nss();
+		}
+		if (reset_would_block) {
+			fprintf(stderr,"Would block\n");
+			while (SSL_ForceHandshake(*socket) != SECSuccess) {
+				if (PR_GetError() == PR_WOULD_BLOCK_ERROR) {
+					fprintf(stderr,"Would block\n");
+				}
+
+				pfd.fd = *socket;
+				pfd.in_flags = PR_POLL_READ | PR_POLL_WRITE | PR_POLL_EXCEPT;
+				pfd.out_flags = 0;
+
+				if ((res = PR_Poll(&pfd, 1, PR_INTERVAL_NO_TIMEOUT)) > 0) {
+					fprintf(stderr, "POLL READ\n");
+				}
+			}
 		}
 	}
 #endif
@@ -206,7 +226,9 @@ int main(void)
 /*	while (1) {*/
 		fprintf(stderr,"Accept connection\n");
 		client_socket = accept_connection();
-
+		if (nss_sock_set_nonblocking(client_socket) != 0) {
+			err_nss();
+		}
 #ifndef ENABLE_TLS
 		client_socket = nss_sock_start_ssl_as_server(client_socket, server.cert, server.private_key, PR_TRUE);
 		if (*socket == NULL) {
