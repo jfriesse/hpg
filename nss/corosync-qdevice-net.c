@@ -250,7 +250,7 @@ tlv_add_cluster_name(char *msg, size_t msg_len, size_t *pos, const char *cluster
 }
 
 size_t
-msg_create_preinit(char *msg, size_t msg_len, const char *cluster_name)
+msg_create_preinit(char *msg, size_t msg_len, const char *cluster_name, uint32_t msg_seq_number)
 {
 	size_t pos;
 
@@ -258,7 +258,7 @@ msg_create_preinit(char *msg, size_t msg_len, const char *cluster_name)
 
 	pos = MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH;
 
-	if (tlv_add_msg_seq_number(msg, msg_len, &pos, 1) == -1) {
+	if (tlv_add_msg_seq_number(msg, msg_len, &pos, msg_seq_number) == -1) {
 		goto small_buf_err;
 	}
 
@@ -274,6 +274,19 @@ small_buf_err:
 	return (0);
 }
 
+ssize_t
+msg_send(PRFileDesc *socket, const char *msg, size_t msg_len, size_t *start_pos)
+{
+	ssize_t sent_bytes;
+
+	if ((sent_bytes = PR_Send(socket, msg + *start_pos,
+	    msg_len - *start_pos, 0, PR_INTERVAL_NO_TIMEOUT)) != -1) {
+		*start_pos += sent_bytes;
+	}
+
+	return (sent_bytes);
+}
+
 /*int send_preinit_msg(const char *cluster_name)
 {
 }*/
@@ -281,8 +294,10 @@ small_buf_err:
 int main(void)
 {
 	PRFileDesc *qnet_socket;
-	char msg[512];
+	char msg[500012];
 	size_t msg_len;
+	size_t start_pos;
+	ssize_t sent_bytes;
 
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		err_nss();
@@ -297,10 +312,14 @@ int main(void)
 		err_nss();
 	}
 
+	if (nss_sock_set_nonblocking(qnet_socket) != 0) {
+		err_nss();
+	}
+
 	/*
 	 * Send preinit message to qnetd
 	 */
-	printf("Ahoj = %zu\n", msg_len = msg_create_preinit(msg, sizeof(msg), "ahoj"));
+	printf("Ahoj = %zu\n", msg_len = msg_create_preinit(msg, sizeof(msg), "ahoj", 1));
 
 	size_t i;
 	char c;
@@ -317,7 +336,14 @@ int main(void)
 	}
 	printf("\n");
 /*	handle_client(client_socket);*/
-
+	start_pos = 0;
+	while (start_pos != sizeof(msg)) {
+		sent_bytes = msg_send(qnet_socket, msg, sizeof(msg), &start_pos);
+		fprintf(stderr, "sent = %zu, overall sent = %zu\n", sent_bytes, start_pos);
+		if (sent_bytes == -1 && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
+		    err_nss();
+		}
+	}
 	if (PR_Close(qnet_socket) != SECSuccess) {
 		err_nss();
 	}

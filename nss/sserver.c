@@ -15,7 +15,7 @@
 
 #define NSS_DB_DIR	"nssdb"
 
-//#define ENABLE_TLS	1
+#define ENABLE_TLS	1
 
 struct server_item {
 	PRFileDesc *socket;
