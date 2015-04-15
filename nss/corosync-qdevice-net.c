@@ -14,6 +14,9 @@
 #include <keyhi.h>
 
 #include "nss-sock.h"
+#include "tlv.h"
+#include "msg.h"
+#include "msgio.h"
 
 #define NSS_DB_DIR	"node/nssdb"
 
@@ -165,128 +168,6 @@ handle_client(PRFileDesc *socket)
 	}
 }
 
-enum msg_type {
-	MSG_TYPE_PREINIT = 0,
-	MSG_TYPE_PREINIT_REPLY = 1,
-};
-
-enum tlv_opt_type {
-	TLV_OPT_MSG_SEQ_NUMBER = 0,
-	TLV_OPT_CLUSTER_NAME = 1,
-};
-
-#define MSG_TYPE_LENGTH		2
-#define MSG_LENGTH_LENGTH	4
-
-void
-msg_set_type(char *msg, enum msg_type type)
-{
-	uint16_t ntype;
-
-	ntype = htons((uint16_t)type);
-	memcpy(msg, &ntype, sizeof(ntype));
-}
-
-void
-msg_set_len(char *msg, uint32_t len)
-{
-	uint32_t nlen;
-
-	nlen = htonl(len);
-	memcpy(msg + 2, &nlen, sizeof(nlen));
-}
-
-int
-tlv_add(char *msg, size_t msg_len, size_t *pos, enum tlv_opt_type opt_type, uint16_t opt_len,
-	const void *value)
-{
-	uint16_t nlen;
-	uint16_t nopt_type;
-
-	if (*pos + sizeof(nopt_type) + sizeof(nlen) + opt_len > msg_len) {
-		return (-1);
-	}
-
-	nopt_type = htons((uint16_t)opt_type);
-	memcpy(msg + *pos, &nopt_type, sizeof(nopt_type));
-	*pos += sizeof(nopt_type);
-
-	nlen = htons(opt_len);
-	memcpy(msg + *pos, &opt_len, sizeof(opt_len));
-	*pos += sizeof(opt_len);
-
-	memcpy(msg + *pos, value, opt_len);
-	*pos += opt_len;
-
-	return (0);
-}
-
-int
-tlv_add_u32(char *msg, size_t msg_len, size_t *pos, enum tlv_opt_type opt_type, uint32_t u32)
-{
-	uint32_t nu32;
-
-	nu32 = htonl(u32);
-
-	return (tlv_add(msg, msg_len, pos, opt_type, sizeof(nu32), &nu32));
-}
-
-int
-tlv_add_string(char *msg, size_t msg_len, size_t *pos, enum tlv_opt_type opt_type, const char *str)
-{
-	return (tlv_add(msg, msg_len, pos, opt_type, strlen(str), str));
-}
-
-int
-tlv_add_msg_seq_number(char *msg, size_t msg_len, size_t *pos, uint32_t msg_seq_number)
-{
-	return (tlv_add_u32(msg, msg_len, pos, TLV_OPT_MSG_SEQ_NUMBER, msg_seq_number));
-}
-
-int
-tlv_add_cluster_name(char *msg, size_t msg_len, size_t *pos, const char *cluster_name)
-{
-	return (tlv_add_string(msg, msg_len, pos, TLV_OPT_CLUSTER_NAME, cluster_name));
-}
-
-size_t
-msg_create_preinit(char *msg, size_t msg_len, const char *cluster_name, uint32_t msg_seq_number)
-{
-	size_t pos;
-
-	msg_set_type(msg, MSG_TYPE_PREINIT);
-
-	pos = MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH;
-
-	if (tlv_add_msg_seq_number(msg, msg_len, &pos, msg_seq_number) == -1) {
-		goto small_buf_err;
-	}
-
-	if (tlv_add_cluster_name(msg, msg_len, &pos, cluster_name) == -1) {
-		goto small_buf_err;
-	}
-
-	msg_set_len(msg, pos - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
-
-	return (pos);
-
-small_buf_err:
-	return (0);
-}
-
-ssize_t
-msg_send(PRFileDesc *socket, const char *msg, size_t msg_len, size_t *start_pos)
-{
-	ssize_t sent_bytes;
-
-	if ((sent_bytes = PR_Send(socket, msg + *start_pos,
-	    msg_len - *start_pos, 0, PR_INTERVAL_NO_TIMEOUT)) != -1) {
-		*start_pos += sent_bytes;
-	}
-
-	return (sent_bytes);
-}
-
 /*int send_preinit_msg(const char *cluster_name)
 {
 }*/
@@ -337,13 +218,12 @@ int main(void)
 	printf("\n");
 /*	handle_client(client_socket);*/
 	start_pos = 0;
-	while (start_pos != sizeof(msg)) {
-		sent_bytes = msg_send(qnet_socket, msg, sizeof(msg), &start_pos);
-		fprintf(stderr, "sent = %zu, overall sent = %zu\n", sent_bytes, start_pos);
-		if (sent_bytes == -1 && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
-		    err_nss();
-		}
+	sent_bytes = msgio_send_blocking(qnet_socket, msg, sizeof(msg));
+	if (sent_bytes == -1 || sent_bytes != sizeof(msg)) {
+		err_nss();
 	}
+	fprintf(stderr,"%zu %zu\n", sent_bytes, sizeof(msg));
+
 	if (PR_Close(qnet_socket) != SECSuccess) {
 		err_nss();
 	}

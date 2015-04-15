@@ -84,6 +84,7 @@ recv_from_client(PRFileDesc **socket)
 
 	fprintf(stderr, "PR_READ\n");
 	readed = PR_Recv(*socket, buf, sizeof(buf), 0, 0);
+//	poll(NULL, 0, 200);
 	fprintf(stderr, "-PR_READ\n");
 	if (readed > 0) {
 		buf[readed] = '\0';
