@@ -17,6 +17,18 @@
 #define QNETD_PORT      4433
 
 #define NSS_DB_DIR	"nssdb"
+#define QNETD_CERT_NICKNAME	"QNetd Cert"
+
+struct qnetd_client {
+	PRFileDesc *socket;
+	unsigned int test;
+};
+
+struct qnetd_clients_array {
+	struct qnetd_client *array;
+	unsigned int items;
+	unsigned int allocated;
+};
 
 struct qnetd_instance {
 	struct {
@@ -24,6 +36,7 @@ struct qnetd_instance {
 		CERTCertificate *cert;
 		SECKEYPrivateKey *private_key;
 	} server;
+	struct qnetd_clients_array clients;
 };
 
 static void err_nss(void) {
@@ -94,10 +107,139 @@ handle_client(PRFileDesc **socket)
 	}
 }
 
+int
+qnetd_instance_init_certs(struct qnetd_instance *instance)
+{
+
+	instance->server.cert = PK11_FindCertFromNickname(QNETD_CERT_NICKNAME, NULL);
+	if (instance->server.cert == NULL) {
+		return (-1);
+	}
+
+	instance->server.private_key = PK11_FindKeyByAnyCert(instance->server.cert, NULL);
+	if (instance->server.private_key == NULL) {
+		return (-1);
+	}
+
+	return (0);
+}
+
+
+void
+qnetd_clients_array_init(struct qnetd_clients_array *clients_array)
+{
+
+	memset(clients_array, 0, sizeof(*clients_array));
+}
+
+struct qnetd_client *
+qnetd_clients_array_add(struct qnetd_clients_array *clients_array)
+{
+	unsigned int new_clients_array_allocated;
+	struct qnetd_client *new_clients_array;
+
+	if (clients_array->items >= clients_array->allocated) {
+		new_clients_array_allocated = (clients_array->allocated * 2) + 1;
+
+		new_clients_array = realloc(clients_array->array,
+		     sizeof(struct qnetd_client) * new_clients_array_allocated);
+
+		if (new_clients_array == NULL) {
+			return (NULL);
+		}
+
+		clients_array->allocated = new_clients_array_allocated;
+		clients_array->array = new_clients_array;
+	}
+
+	clients_array->items++;
+
+	return (&clients_array->array[clients_array->items - 1]);
+}
+
+
+struct qnetd_client *
+qnetd_clients_array_get(const struct qnetd_clients_array *clients_array, unsigned int pos)
+{
+
+	if (pos >= clients_array->items) {
+		return (NULL);
+	}
+
+	return (&clients_array->array[pos]);
+}
+
+unsigned int
+qnetd_clients_array_size(const struct qnetd_clients_array *clients_array)
+{
+
+	return (clients_array->items);
+}
+
+void
+qnetd_clients_array_del(struct qnetd_clients_array *clients_array, const struct qnetd_client *item)
+{
+	void *last_item_end_ptr;
+	void *src_ptr;
+	void *dst_ptr;
+
+	last_item_end_ptr = (void *)clients_array->array + (sizeof(*item) * clients_array->items);
+	src_ptr = (void *)item + sizeof(*item);
+	dst_ptr = (void *)item;
+
+	memmove(dst_ptr, src_ptr, last_item_end_ptr - src_ptr);
+
+	clients_array->items--;
+}
+
+
 int main(void)
 {
 	struct qnetd_instance instance;
+	struct qnetd_clients_array cla;
+	struct qnetd_client *cl1, *cl2, *cl3, *cl4;
+	int i;
 
+	qnetd_clients_array_init(&cla);
+
+
+/*	cl1 = qnetd_clients_array_add(&cla);
+	cl1->test = 1;
+	cl2 = qnetd_clients_array_add(&cla);
+	cl2->test = 2;*/
+/*	cl3 = qnetd_clients_array_add(&cla);
+	cl3->test = 3;
+	cl4 = qnetd_clients_array_add(&cla);
+	cl4->test = 4;*/
+
+/*	cl1 = qnetd_clients_array_get(&cla, 0);
+	cl2 = qnetd_clients_array_get(&cla, 1);
+
+	qnetd_clients_array_del(&cla, cl2);*/
+
+	for (i = 0; i < 200; i++) {
+		cl1 = qnetd_clients_array_add(&cla);
+		cl1->test = i;
+	}
+
+	qnetd_clients_array_del(&cla, qnetd_clients_array_get(&cla, 100));
+
+	for (i = 0; i < qnetd_clients_array_size(&cla); i++) {
+		printf("%u = %u\n", i, qnetd_clients_array_get(&cla, i)->test);
+	}
+
+	for (i = 0; qnetd_clients_array_size(&cla) > 10; i++) {
+		qnetd_clients_array_del(&cla, qnetd_clients_array_get(&cla, random() % qnetd_clients_array_size(&cla) + 1));
+	}
+
+	for (i = 0; i < qnetd_clients_array_size(&cla); i++) {
+		printf("%u = %u\n", i, qnetd_clients_array_get(&cla, i)->test);
+	}
+
+/*	cl2 = qnetd_clients_array_add(&cla);
+	cl2->socket = (void*)2;*/
+
+	exit(1);
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		err_nss();
 	}
@@ -106,18 +248,16 @@ int main(void)
 		err_nss();
 	}
 
-	instance.server.cert = PK11_FindCertFromNickname("QNetd Cert", NULL);
-	if (instance.server.cert == NULL) {
-		err_nss();
-	}
-
-	instance.server.private_key = PK11_FindKeyByAnyCert(instance.server.cert, NULL);
-	if (instance.server.private_key == NULL) {
+	if (qnetd_instance_init_certs(&instance) == -1) {
 		err_nss();
 	}
 
 	instance.server.socket = nss_sock_create_listen_socket(QNETD_HOST, QNETD_PORT, PR_AF_INET6);
 	if (instance.server.socket == NULL) {
+		err_nss();
+	}
+
+	if (nss_sock_set_nonblocking(instance.server.socket) != 0) {
 		err_nss();
 	}
 
