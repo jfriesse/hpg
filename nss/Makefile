@@ -1,6 +1,6 @@
 CFLAGS+=-Wall -ggdb
 
-all: sserver sclient corosync-qdevice-net
+all: sserver sclient corosync-qdevice-net corosync-qnetd
 
 sserver: sserver.c nss-sock.c
 	$(CC) $(CFLAGS) `pkg-config --cflags nspr` `pkg-config --cflags nss` nss-sock.c sserver.c \
@@ -19,3 +19,9 @@ corosync-qdevice-net: corosync-qdevice-net.c nss-sock.c tlv.c msg.c msgio.c
 	nss-sock.c tlv.c msg.c msgio.c \
 	corosync-qdevice-net.c \
 	`pkg-config --libs nspr` `pkg-config --libs nss` -o corosync-qdevice-net
+
+corosync-qnetd: corosync-qnetd.c nss-sock.c tlv.c msg.c msgio.c
+	$(CC) $(CFLAGS) `pkg-config --cflags nspr` `pkg-config --cflags nss` \
+	nss-sock.c tlv.c msg.c msgio.c \
+	corosync-qnetd.c \
+	`pkg-config --libs nspr` `pkg-config --libs nss` -o corosync-qnetd

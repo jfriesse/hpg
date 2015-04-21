@@ -257,7 +257,7 @@ int main(void)
 	CERT_DestroyCertificate(server.cert);
 	SECKEY_DestroyPrivateKey(server.private_key);
 
-/*	SSL_ClearSessionCache();*/
+	SSL_ClearSessionCache();
 
 	SSL_ShutdownServerSessionIDCache();
 
