@@ -16,7 +16,7 @@ dump_list(void)
 	struct list_item *iter;
 
 	printf("List content:\n");
-	for (iter = PR_LIST_HEAD(&items); iter != &items; iter = PR_NEXT_LINK(&iter->list)) {
+	for (iter = (struct list_item *)PR_LIST_HEAD(&items); iter != (struct list_item *)&items; iter = (struct list_item *)PR_NEXT_LINK(&iter->list)) {
 		printf("%u\n", iter->i);
 	}
 }
@@ -26,6 +26,9 @@ main(void)
 {
 	int i;
 	struct list_item *item, *item2;
+	PRIntervalTime epoch = PR_IntervalNow();
+	PRIntervalTime now = PR_IntervalNow();
+	int j = 0;
 
 	PR_INIT_CLIST(&items);
 
@@ -40,10 +43,10 @@ main(void)
 	/*
 	 * Delete 3rd item
 	 */
-	item = PR_LIST_HEAD(&items);
-	item = PR_NEXT_LINK(&item->list);
-	item = PR_NEXT_LINK(&item->list);
-	item2 = PR_NEXT_LINK(&item->list);
+	item = (struct list_item *)PR_LIST_HEAD(&items);
+	item = (struct list_item *)PR_NEXT_LINK(&item->list);
+	item = (struct list_item *)PR_NEXT_LINK(&item->list);
+	item2 = (struct list_item *)PR_NEXT_LINK(&item->list);
 	PR_REMOVE_AND_INIT_LINK(&item->list);
 	dump_list();
 
@@ -57,9 +60,29 @@ main(void)
 	 * Empty list
 	 */
 	while (!PR_CLIST_IS_EMPTY(&items)) {
-		item = PR_LIST_HEAD(&items);
+		item = (struct list_item *)PR_LIST_HEAD(&items);
 		PR_REMOVE_AND_INIT_LINK(&item->list);
 		free(item);
 	}
 	dump_list();
+
+	/*
+	 * Test timer
+	 */
+	while (1) {
+		now = PR_IntervalNow();
+
+		if ((PRIntervalTime)(now - epoch) > PR_MillisecondsToInterval(100)) {
+			/*
+			 * Timeout
+			 */
+			break ;
+		} else {
+			j++;
+		}
+	}
+
+	printf("No cycles = %u, interval = %u\n", j, (PRIntervalTime)(now - epoch));
+
+	return (0);
 }
