@@ -12,6 +12,8 @@
 #include <keyhi.h>
 
 #include "nss-sock.h"
+#include "qnetd-client.h"
+#include "qnetd-clients-array.h"
 
 #define QNETD_HOST      NULL
 #define QNETD_PORT      4433
@@ -19,16 +21,6 @@
 #define NSS_DB_DIR	"nssdb"
 #define QNETD_CERT_NICKNAME	"QNetd Cert"
 
-struct qnetd_client {
-	PRFileDesc *socket;
-	unsigned int test;
-};
-
-struct qnetd_clients_array {
-	struct qnetd_client *array;
-	unsigned int items;
-	unsigned int allocated;
-};
 
 struct qnetd_instance {
 	struct {
@@ -125,79 +117,13 @@ qnetd_instance_init_certs(struct qnetd_instance *instance)
 }
 
 
-void
-qnetd_clients_array_init(struct qnetd_clients_array *clients_array)
-{
-
-	memset(clients_array, 0, sizeof(*clients_array));
-}
-
-struct qnetd_client *
-qnetd_clients_array_add(struct qnetd_clients_array *clients_array)
-{
-	unsigned int new_clients_array_allocated;
-	struct qnetd_client *new_clients_array;
-
-	if (clients_array->items >= clients_array->allocated) {
-		new_clients_array_allocated = (clients_array->allocated * 2) + 1;
-
-		new_clients_array = realloc(clients_array->array,
-		     sizeof(struct qnetd_client) * new_clients_array_allocated);
-
-		if (new_clients_array == NULL) {
-			return (NULL);
-		}
-
-		clients_array->allocated = new_clients_array_allocated;
-		clients_array->array = new_clients_array;
-	}
-
-	clients_array->items++;
-
-	return (&clients_array->array[clients_array->items - 1]);
-}
-
-
-struct qnetd_client *
-qnetd_clients_array_get(const struct qnetd_clients_array *clients_array, unsigned int pos)
-{
-
-	if (pos >= clients_array->items) {
-		return (NULL);
-	}
-
-	return (&clients_array->array[pos]);
-}
-
-unsigned int
-qnetd_clients_array_size(const struct qnetd_clients_array *clients_array)
-{
-
-	return (clients_array->items);
-}
-
-void
-qnetd_clients_array_del(struct qnetd_clients_array *clients_array, const struct qnetd_client *item)
-{
-	void *last_item_end_ptr;
-	void *src_ptr;
-	void *dst_ptr;
-
-	last_item_end_ptr = (void *)clients_array->array + (sizeof(*item) * clients_array->items);
-	src_ptr = (void *)item + sizeof(*item);
-	dst_ptr = (void *)item;
-
-	memmove(dst_ptr, src_ptr, last_item_end_ptr - src_ptr);
-
-	clients_array->items--;
-}
 
 
 int main(void)
 {
 	struct qnetd_instance instance;
 	struct qnetd_clients_array cla;
-	struct qnetd_client *cl1, *cl2, *cl3, *cl4;
+	struct qnetd_client *cl1; /*, *cl2, *cl3, *cl4;*/
 	int i;
 
 	qnetd_clients_array_init(&cla);
@@ -217,19 +143,33 @@ int main(void)
 
 	qnetd_clients_array_del(&cla, cl2);*/
 
-	for (i = 0; i < 200; i++) {
+	for (i = 0; i < 5000; i++) {
 		cl1 = qnetd_clients_array_add(&cla);
 		cl1->test = i;
 	}
 
-	qnetd_clients_array_del(&cla, qnetd_clients_array_get(&cla, 100));
+	qnetd_clients_array_del(&cla, 0);
 
 	for (i = 0; i < qnetd_clients_array_size(&cla); i++) {
 		printf("%u = %u\n", i, qnetd_clients_array_get(&cla, i)->test);
 	}
 
 	for (i = 0; qnetd_clients_array_size(&cla) > 10; i++) {
-		qnetd_clients_array_del(&cla, qnetd_clients_array_get(&cla, random() % qnetd_clients_array_size(&cla) + 1));
+		qnetd_clients_array_del(&cla, random() % qnetd_clients_array_size(&cla) + 1);
+		//qnetd_clients_array_gc(&cla);
+		printf("Allocated = %u\n", cla.allocated);
+		qnetd_clients_array_del(&cla, qnetd_clients_array_size(&cla) - 1);
+	}
+
+	for (i = 0; i < 5000; i++) {
+		cl1 = qnetd_clients_array_add(&cla);
+		cl1->test = i;
+		printf("Allocated = %u\n", cla.allocated);
+	}
+	for (i = 0; qnetd_clients_array_size(&cla) > 10; i++) {
+		qnetd_clients_array_del(&cla, random() % qnetd_clients_array_size(&cla) + 1);
+		printf("Allocated = %u\n", cla.allocated);
+		qnetd_clients_array_del(&cla, qnetd_clients_array_size(&cla) - 1);
 	}
 
 	for (i = 0; i < qnetd_clients_array_size(&cla); i++) {
@@ -238,6 +178,7 @@ int main(void)
 
 /*	cl2 = qnetd_clients_array_add(&cla);
 	cl2->socket = (void*)2;*/
+	qnetd_clients_array_destroy(&cla);
 
 	exit(1);
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
