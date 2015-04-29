@@ -55,4 +55,5 @@ qnetd_clients_list_del(struct qnetd_clients_list *clients_list, struct qnetd_cli
 {
 
 	TAILQ_REMOVE(clients_list, client, entries);
+	free(client);
 }

@@ -26,6 +26,8 @@ struct qnetd_client {
 
 extern void		qnetd_client_init(struct qnetd_client *client, PRFileDesc *socket);
 
+extern PRInt16		qnetd_client_state_to_poll_event(enum qnetd_client_state state);
+
 #ifdef __cplusplus
 }
 #endif
