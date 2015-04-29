@@ -13,7 +13,7 @@
 
 #include "nss-sock.h"
 #include "qnetd-client.h"
-#include "qnetd-clients-array.h"
+#include "qnetd-clients-list.h"
 
 #define QNETD_HOST      NULL
 #define QNETD_PORT      4433
@@ -28,7 +28,7 @@ struct qnetd_instance {
 		CERTCertificate *cert;
 		SECKEYPrivateKey *private_key;
 	} server;
-	struct qnetd_clients_array clients;
+	struct qnetd_clients_list clients;
 };
 
 static void err_nss(void) {
@@ -47,6 +47,8 @@ accept_connection(const struct qnetd_instance *instance)
 
 	return (client_socket);
 }
+
+
 
 void
 handle_client(PRFileDesc **socket)
@@ -116,71 +118,229 @@ qnetd_instance_init_certs(struct qnetd_instance *instance)
 	return (0);
 }
 
+struct qnetd_poll_array {
+	PRPollDesc *array;
+	unsigned int allocated;
+	unsigned int items;
+};
+
+void
+qnetd_poll_array_init(struct qnetd_poll_array *poll_array)
+{
+
+	memset(poll_array, 0, sizeof(*poll_array));
+}
+
+void
+qnetd_poll_array_destroy(struct qnetd_poll_array *poll_array)
+{
+
+	free(poll_array->array);
+	qnetd_poll_array_init(poll_array);
+}
+
+void
+qnetd_poll_array_clean(struct qnetd_poll_array *poll_array)
+{
+
+	poll_array->items = 0;
+}
+
+static int
+qnetd_poll_array_realloc(struct qnetd_poll_array *poll_array,
+    unsigned int new_array_size)
+{
+	PRPollDesc *new_array;
+
+	new_array = realloc(poll_array->array,
+	    sizeof(PRPollDesc) * new_array_size);
+
+	if (new_array == NULL) {
+		return (-1);
+	}
+
+	poll_array->allocated = new_array_size;
+	poll_array->array = new_array;
+
+	return (0);
+}
+
+unsigned int
+qnetd_poll_array_size(struct qnetd_poll_array *poll_array)
+{
+
+	return (poll_array->items);
+}
+
+PRPollDesc *
+qnetd_poll_array_add(struct qnetd_poll_array *poll_array)
+{
+
+	if (qnetd_poll_array_size(poll_array) >= poll_array->allocated) {
+		if (qnetd_poll_array_realloc(poll_array, (poll_array->allocated * 2) + 1)) {
+			return (NULL);
+		}
+	}
+
+	poll_array->items++;
+
+	return (&poll_array->array[qnetd_poll_array_size(poll_array) - 1]);
+}
+
+static void
+qnetd_poll_array_gc(struct qnetd_poll_array *poll_array)
+{
+
+	if (poll_array->allocated > (qnetd_poll_array_size(poll_array) * 3) + 1) {
+		qnetd_poll_array_realloc(poll_array, (qnetd_poll_array_size(poll_array) * 2) + 1);
+	}
+}
+
+PRPollDesc *
+qnetd_poll_array_get(const struct qnetd_poll_array *poll_array, unsigned int pos)
+{
+
+	if (pos >= poll_array->items) {
+		return (NULL);
+	}
+
+	return (&poll_array->array[pos]);
+}
+
+PRInt16
+qnetd_client_state_to_poll_event(enum qnetd_client_state state)
+{
+	PRInt16 res;
+
+	res = 0;
+
+	switch (state) {
+	case QNETD_CLIENT_STATE_SENDING_MSG:
+		res = PR_POLL_WRITE;
+		break;
+	case QNETD_CLIENT_STATE_RECEIVING_MSG:
+		res = PR_POLL_READ;
+		break;
+	case QNETD_CLIENT_STATE_SSL_HANDSHAKE:
+		res = PR_POLL_WRITE | PR_POLL_READ;
+		break;
+	default:
+		res = 0;
+		break;
+	}
+
+	return (res);
+}
 
 
+PRPollDesc *
+qnetd_poll_array_create_from_clients_list(struct qnetd_poll_array *poll_array,
+    const struct qnetd_clients_list *clients_list,
+    PRFileDesc *extra_fd, PRInt16 extra_fd_in_flags)
+{
+	struct qnetd_client *client;
+	PRPollDesc *poll_desc;
+
+	qnetd_poll_array_clean(poll_array);
+
+	TAILQ_FOREACH(client, clients_list, entries) {
+		poll_desc = qnetd_poll_array_add(poll_array);
+		if (poll_desc == NULL) {
+			return (NULL);
+		}
+		poll_desc->fd = client->socket;
+		poll_desc->in_flags = qnetd_client_state_to_poll_event(client->state);
+		poll_desc->out_flags = 0;
+	}
+
+	if (extra_fd != NULL) {
+		poll_desc = qnetd_poll_array_add(poll_array);
+		if (poll_desc == NULL) {
+			return (NULL);
+		}
+
+		poll_desc->fd = extra_fd;
+		poll_desc->in_flags = extra_fd_in_flags;
+		poll_desc->out_flags = 0;
+	}
+
+	qnetd_poll_array_gc(poll_array);
+
+	return (poll_array->array);
+}
 
 int main(void)
 {
-	struct qnetd_instance instance;
-	struct qnetd_clients_array cla;
-	struct qnetd_client *cl1; /*, *cl2, *cl3, *cl4;*/
+	struct qnetd_clients_list clients;
+	struct qnetd_client *cl;
 	int i;
+	void *p;
+	PRPollDesc *pd;
+	struct qnetd_poll_array pa;
 
-	qnetd_clients_array_init(&cla);
+	qnetd_clients_list_init(&clients);
 
-
-/*	cl1 = qnetd_clients_array_add(&cla);
-	cl1->test = 1;
-	cl2 = qnetd_clients_array_add(&cla);
-	cl2->test = 2;*/
-/*	cl3 = qnetd_clients_array_add(&cla);
-	cl3->test = 3;
-	cl4 = qnetd_clients_array_add(&cla);
-	cl4->test = 4;*/
-
-/*	cl1 = qnetd_clients_array_get(&cla, 0);
-	cl2 = qnetd_clients_array_get(&cla, 1);
-
-	qnetd_clients_array_del(&cla, cl2);*/
-
-	for (i = 0; i < 5000; i++) {
-		cl1 = qnetd_clients_array_add(&cla);
-		cl1->test = i;
+	for (i = 0; i < 10; i++) {
+		p = (void *)(uint64_t)i;
+		cl = qnetd_clients_list_add(&clients, p);
 	}
 
-	qnetd_clients_array_del(&cla, 0);
-
-	for (i = 0; i < qnetd_clients_array_size(&cla); i++) {
-		printf("%u = %u\n", i, qnetd_clients_array_get(&cla, i)->test);
+	TAILQ_FOREACH(cl, &clients, entries) {
+		fprintf(stderr, "%u\n", (uint32_t)((uint64_t)cl->socket));
 	}
 
-	for (i = 0; qnetd_clients_array_size(&cla) > 10; i++) {
-		qnetd_clients_array_del(&cla, random() % qnetd_clients_array_size(&cla) + 1);
-		//qnetd_clients_array_gc(&cla);
-		printf("Allocated = %u\n", cla.allocated);
-		qnetd_clients_array_del(&cla, qnetd_clients_array_size(&cla) - 1);
+	cl = TAILQ_NEXT(TAILQ_FIRST(&clients), entries);
+	qnetd_clients_list_del(&clients, cl);
+
+	TAILQ_FOREACH(cl, &clients, entries) {
+		fprintf(stderr, "%u\n", (uint32_t)((uint64_t)cl->socket));
 	}
 
-	for (i = 0; i < 5000; i++) {
-		cl1 = qnetd_clients_array_add(&cla);
-		cl1->test = i;
-		printf("Allocated = %u\n", cla.allocated);
-	}
-	for (i = 0; qnetd_clients_array_size(&cla) > 10; i++) {
-		qnetd_clients_array_del(&cla, random() % qnetd_clients_array_size(&cla) + 1);
-		printf("Allocated = %u\n", cla.allocated);
-		qnetd_clients_array_del(&cla, qnetd_clients_array_size(&cla) - 1);
+	qnetd_poll_array_init(&pa);
+
+
+	pd = qnetd_poll_array_create_from_clients_list(&pa, &clients, (void *)(uint64_t)66, 0);
+	fprintf(stderr, "%u\n", qnetd_poll_array_size(&pa));
+
+	for (i = 0; i < qnetd_poll_array_size(&pa); i++) {
+		fprintf(stderr, "%u %u %u\n", i, (uint32_t)((uint64_t)pd[i].fd), pd[i].in_flags);
 	}
 
-	for (i = 0; i < qnetd_clients_array_size(&cla); i++) {
-		printf("%u = %u\n", i, qnetd_clients_array_get(&cla, i)->test);
+	//cl = TAILQ_NEXT(TAILQ_FIRST(&clients), entries);
+	//qnetd_clients_list_del(&clients, cl);
+	qnetd_clients_list_free(&clients);
+
+	pd = qnetd_poll_array_create_from_clients_list(&pa, &clients, (void *)(uint64_t)66, 0);
+	fprintf(stderr, "%u\n", qnetd_poll_array_size(&pa));
+
+	for (i = 0; i < qnetd_poll_array_size(&pa); i++) {
+		fprintf(stderr, "%u %u %u\n", i, (uint32_t)((uint64_t)pd[i].fd), pd[i].in_flags);
+	}
+	/*struct qnetd_poll_array pa;
+	int i;
+	PRPollDesc *prpd;
+
+	qnetd_poll_array_init(&pa);
+
+	fprintf(stderr, "%u %u %u\n", qnetd_poll_array_combined_size(&pa), qnetd_poll_array_size(&pa),
+	    qnetd_poll_array_special_size(&pa));
+
+	for (i = 0; i < 10; i++) {
+		prpd = qnetd_poll_array_add(&pa);
+		prpd->in_flags = i;
 	}
 
-/*	cl2 = qnetd_clients_array_add(&cla);
-	cl2->socket = (void*)2;*/
-	qnetd_clients_array_destroy(&cla);
+	for (i = 0; i < qnetd_poll_array_size(&pa); i++) {
+		fprintf(stderr, "%u\n", qnetd_poll_array_get(&pa, i)->in_flags);
+	}
+
+	fprintf(stderr, "%u %u %u\n", qnetd_poll_array_combined_size(&pa), qnetd_poll_array_size(&pa),
+	    qnetd_poll_array_special_size(&pa));*/
 
 	exit(1);
+
+	struct qnetd_instance instance;
+
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		err_nss();
 	}
