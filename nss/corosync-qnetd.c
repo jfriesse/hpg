@@ -30,6 +30,7 @@ struct qnetd_instance {
 		SECKEYPrivateKey *private_key;
 	} server;
 	struct qnetd_clients_list clients;
+	struct qnetd_poll_array poll_array;
 };
 
 static void err_nss(void) {
@@ -48,8 +49,6 @@ accept_connection(const struct qnetd_instance *instance)
 
 	return (client_socket);
 }
-
-
 
 void
 handle_client(PRFileDesc **socket)
@@ -121,76 +120,6 @@ qnetd_instance_init_certs(struct qnetd_instance *instance)
 
 int main(void)
 {
-	struct qnetd_clients_list clients;
-	struct qnetd_client *cl;
-	int i;
-	void *p;
-	PRPollDesc *pd;
-	struct qnetd_poll_array pa;
-
-	qnetd_clients_list_init(&clients);
-
-	for (i = 0; i < 10; i++) {
-		p = (void *)(uint64_t)i;
-		cl = qnetd_clients_list_add(&clients, p);
-	}
-
-	TAILQ_FOREACH(cl, &clients, entries) {
-		fprintf(stderr, "%u\n", (uint32_t)((uint64_t)cl->socket));
-	}
-
-	cl = TAILQ_NEXT(TAILQ_FIRST(&clients), entries);
-	qnetd_clients_list_del(&clients, cl);
-
-	TAILQ_FOREACH(cl, &clients, entries) {
-		fprintf(stderr, "%u\n", (uint32_t)((uint64_t)cl->socket));
-	}
-
-	qnetd_poll_array_init(&pa);
-
-
-	pd = qnetd_poll_array_create_from_clients_list(&pa, &clients, (void *)(uint64_t)66, 0);
-	fprintf(stderr, "%u\n", qnetd_poll_array_size(&pa));
-
-	for (i = 0; i < qnetd_poll_array_size(&pa); i++) {
-		fprintf(stderr, "%u %u %u\n", i, (uint32_t)((uint64_t)pd[i].fd), pd[i].in_flags);
-	}
-
-	//cl = TAILQ_NEXT(TAILQ_FIRST(&clients), entries);
-	//qnetd_clients_list_del(&clients, cl);
-	qnetd_clients_list_free(&clients);
-
-	pd = qnetd_poll_array_create_from_clients_list(&pa, &clients, (void *)(uint64_t)66, 0);
-	fprintf(stderr, "%u\n", qnetd_poll_array_size(&pa));
-
-	for (i = 0; i < qnetd_poll_array_size(&pa); i++) {
-		fprintf(stderr, "%u %u %u\n", i, (uint32_t)((uint64_t)pd[i].fd), pd[i].in_flags);
-	}
-
-	qnetd_poll_array_destroy(&pa);
-	/*struct qnetd_poll_array pa;
-	int i;
-	PRPollDesc *prpd;
-
-	qnetd_poll_array_init(&pa);
-
-	fprintf(stderr, "%u %u %u\n", qnetd_poll_array_combined_size(&pa), qnetd_poll_array_size(&pa),
-	    qnetd_poll_array_special_size(&pa));
-
-	for (i = 0; i < 10; i++) {
-		prpd = qnetd_poll_array_add(&pa);
-		prpd->in_flags = i;
-	}
-
-	for (i = 0; i < qnetd_poll_array_size(&pa); i++) {
-		fprintf(stderr, "%u\n", qnetd_poll_array_get(&pa, i)->in_flags);
-	}
-
-	fprintf(stderr, "%u %u %u\n", qnetd_poll_array_combined_size(&pa), qnetd_poll_array_size(&pa),
-	    qnetd_poll_array_special_size(&pa));*/
-
-	exit(1);
-
 	struct qnetd_instance instance;
 
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
