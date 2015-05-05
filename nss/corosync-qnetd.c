@@ -11,23 +11,19 @@
 #include <err.h>
 #include <keyhi.h>
 #include <syslog.h>
-#include <stdarg.h>
 
 #include "nss-sock.h"
 #include "qnetd-client.h"
 #include "qnetd-clients-list.h"
 #include "qnetd-poll-array.h"
+#include "qnetd-log.h"
 
-#define PROGRAM_NAME	"corosync-qnetd"
 #define QNETD_HOST      NULL
 #define QNETD_PORT      4433
 #define QNETD_LISTEN_BACKLOG	10
 
 #define NSS_DB_DIR	"nssdb"
 #define QNETD_CERT_NICKNAME	"QNetd Cert"
-
-#define QNETD_LOG_TARGET_STDERR		1
-#define QNETD_LOG_TARGET_SYSLOG		2
 
 struct qnetd_instance {
 	struct {
@@ -39,62 +35,12 @@ struct qnetd_instance {
 	struct qnetd_poll_array poll_array;
 };
 
-static void err_nss(void) {
-	errx(1, "nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
-}
 
-static int qnetd_log_config_target = 0;
-static int qnetd_log_config_debug = 0;
 
-void
-qnetd_log_init(int target)
-{
+static void qnetd_err_nss(void) {
+	qnetd_log_nss(LOG_CRIT, "NSS error");
 
-	qnetd_log_config_target = target;
-
-	if (qnetd_log_config_target & QNETD_LOG_TARGET_SYSLOG) {
-		openlog(PROGRAM_NAME, LOG_PID, LOG_DAEMON);
-	}
-}
-
-void
-qnetd_log_printf(int priority, const char *format, ...)
-{
-	va_list ap;
-
-	if (priority != LOG_DEBUG || (qnetd_log_config_debug)) {
-		if (qnetd_log_config_target & QNETD_LOG_TARGET_STDERR) {
-			va_start(ap, format);
-			vfprintf(stderr, format, ap);
-			fprintf(stderr, "\n");
-			va_end(ap);
-		}
-
-		if (qnetd_log_config_target & QNETD_LOG_TARGET_SYSLOG) {
-			va_start(ap, format);
-			vsyslog(priority, format, ap);
-			va_end(ap);
-		}
-	}
-}
-
-void
-qnetd_log_nss_printf(int priority, const char *format)
-{
-	errx(1, "nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
-}
-
-#define qnetd_log(...)	qnetd_log_printf(__VA_ARGS__)
-#define qnetd_log_nss(priority, str) qnetd_log_printf(priority, "%s (%d): %s", \
-    str, PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT)); 
-
-void
-qnetd_log_close(void)
-{
-
-	if (qnetd_log_config_target & QNETD_LOG_TARGET_SYSLOG) {
-		closelog();
-	}
+	exit(1);
 }
 
 void
@@ -224,11 +170,11 @@ int main(void)
 	qnetd_log_init(QNETD_LOG_TARGET_STDERR);
 
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
-		err_nss();
+		qnetd_err_nss();
 	}
 
 	if (SSL_ConfigServerSessionIDCache(0, 0, 0, NULL) != SECSuccess) {
-		err_nss();
+		qnetd_err_nss();
 	}
 
 	if (qnetd_instance_init(&instance) == -1) {
@@ -236,20 +182,20 @@ int main(void)
 	}
 
 	if (qnetd_instance_init_certs(&instance) == -1) {
-		err_nss();
+		qnetd_err_nss();
 	}
 
 	instance.server.socket = nss_sock_create_listen_socket(QNETD_HOST, QNETD_PORT, PR_AF_INET6);
 	if (instance.server.socket == NULL) {
-		err_nss();
+		qnetd_err_nss();
 	}
 
 	if (nss_sock_set_nonblocking(instance.server.socket) != 0) {
-		err_nss();
+		qnetd_err_nss();
 	}
 
 	if (PR_Listen(instance.server.socket, QNETD_LISTEN_BACKLOG) != PR_SUCCESS) {
-		err_nss();
+		qnetd_err_nss();
 	}
 
 	while (1) {
@@ -266,10 +212,12 @@ int main(void)
 	SSL_ShutdownServerSessionIDCache();
 
 	if (NSS_Shutdown() != SECSuccess) {
-		err_nss();
+		qnetd_err_nss();
 	}
 
 	PR_Cleanup();
+
+	qnetd_log_close();
 
 	return (0);
 }
