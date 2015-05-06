@@ -20,11 +20,12 @@ enum qnetd_client_state {
 
 struct qnetd_client {
 	PRFileDesc *socket;
+	PRNetAddr addr;
 	enum qnetd_client_state state;
 	TAILQ_ENTRY(qnetd_client) entries;
 };
 
-extern void		qnetd_client_init(struct qnetd_client *client, PRFileDesc *socket);
+extern void		qnetd_client_init(struct qnetd_client *client, PRFileDesc *socket, PRNetAddr *addr);
 
 extern PRInt16		qnetd_client_state_to_poll_event(enum qnetd_client_state state);
 

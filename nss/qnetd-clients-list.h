@@ -15,7 +15,7 @@ TAILQ_HEAD(qnetd_clients_list, qnetd_client);
 extern void			 qnetd_clients_list_init(struct qnetd_clients_list *clients_list);
 
 extern struct qnetd_client	*qnetd_clients_list_add(struct qnetd_clients_list *clients_list,
-    PRFileDesc *socket);
+    PRFileDesc *socket, PRNetAddr *addr);
 
 extern void			 qnetd_clients_list_free(struct qnetd_clients_list *clients_list);
 

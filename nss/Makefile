@@ -20,8 +20,10 @@ corosync-qdevice-net: corosync-qdevice-net.c nss-sock.c tlv.c msg.c msgio.c
 	corosync-qdevice-net.c \
 	`pkg-config --libs nspr` `pkg-config --libs nss` -o corosync-qdevice-net
 
-corosync-qnetd: corosync-qnetd.c nss-sock.c tlv.c msg.c msgio.c qnetd-clients-list.c qnetd-client.c qnetd-poll-array.c qnetd-log.c
+corosync-qnetd: corosync-qnetd.c nss-sock.c tlv.c msg.c msgio.c qnetd-clients-list.c qnetd-client.c \
+    qnetd-poll-array.c qnetd-log.c dynar.c
 	$(CC) $(CFLAGS) `pkg-config --cflags nspr` `pkg-config --cflags nss` \
-	nss-sock.c tlv.c msg.c msgio.c qnetd-clients-list.c qnetd-client.c qnetd-poll-array.c qnetd-log.c \
+	nss-sock.c tlv.c msg.c msgio.c qnetd-clients-list.c qnetd-client.c qnetd-poll-array.c \
+	qnetd-log.c dynar.c \
 	corosync-qnetd.c \
 	`pkg-config --libs nspr` `pkg-config --libs nss` -o corosync-qnetd

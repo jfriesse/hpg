@@ -5,12 +5,13 @@
 #include "qnetd-client.h"
 
 void
-qnetd_client_init(struct qnetd_client *client, PRFileDesc *socket)
+qnetd_client_init(struct qnetd_client *client, PRFileDesc *socket, PRNetAddr *addr)
 {
 
 	memset(client, 0, sizeof(*client));
 	client->socket = socket;
 	client->state = QNETD_CLIENT_STATE_RECEIVING_MSG;
+	memcpy(&client->addr, addr, sizeof(*addr));
 }
 
 PRInt16
