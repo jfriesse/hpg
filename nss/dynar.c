@@ -71,7 +71,7 @@ dynar_realloc(struct dynar *array, size_t new_array_size)
 }
 
 int
-dynar_cat(struct dynar *array, char *src, size_t size)
+dynar_cat(struct dynar *array, const void *src, size_t size)
 {
 	size_t new_size;
 

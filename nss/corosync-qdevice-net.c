@@ -13,6 +13,7 @@
 #include <err.h>
 #include <keyhi.h>
 
+#include "dynar.h"
 #include "nss-sock.h"
 #include "tlv.h"
 #include "msg.h"
@@ -30,7 +31,7 @@ static void err_nss(void) {
 int main(void)
 {
 	PRFileDesc *qnet_socket;
-	char msg[65535];
+	struct dynar msg;
 	size_t msg_len;
 	size_t start_pos;
 	ssize_t sent_bytes;
@@ -51,17 +52,19 @@ int main(void)
 		err_nss();
 	}
 
+	dynar_init(&msg, 1024);
+
 	/*
 	 * Create and send preinit message to qnetd
 	 */
-	msg_len = msg_create_preinit(msg, sizeof(msg), "Cluster", 1);
+	msg_len = msg_create_preinit(&msg, "Cluster", 1);
 	if (msg_len == 0) {
 		errx(1, "Can't allocate buffer");
 	}
 
 	start_pos = 0;
-	sent_bytes = msgio_send_blocking(qnet_socket, msg, sizeof(msg));
-	if (sent_bytes == -1 || sent_bytes != sizeof(msg)) {
+	sent_bytes = msgio_send_blocking(qnet_socket, dynar_data(&msg), msg_len);
+	if (sent_bytes == -1 || sent_bytes != msg_len) {
 		err_nss();
 	}
 

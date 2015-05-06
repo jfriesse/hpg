@@ -30,7 +30,7 @@ extern size_t	 dynar_max_size(struct dynar *array);
 
 extern char	*dynar_data(struct dynar *array);
 
-extern int	 dynar_cat(struct dynar *array, char *src, size_t size);
+extern int	 dynar_cat(struct dynar *array, const void *src, size_t size);
 
 
 #ifdef __cplusplus

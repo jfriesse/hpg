@@ -168,31 +168,6 @@ qnetd_instance_init(struct qnetd_instance *instance)
 int main(void)
 {
 	struct qnetd_instance instance;
-	struct dynar ar, ar2;
-	int i;
-
-	dynar_init(&ar, 65535);
-	dynar_init(&ar2, 65535);
-
-	for (i = 0; i < 7000; i++) {
-	fprintf(stderr, "res = %u\n", dynar_cat(&ar, "ahojsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdfsdf", random() % 20));
-	fprintf(stderr, "%zu %zu %zu\n", ar.size, ar.allocated, ar.maximum_size);
-	}
-
-	fprintf(stderr, "%zu %zu %zu\n", ar.size, ar.allocated, ar.maximum_size);
-	fprintf(stderr, "%zu %zu %zu\n", ar2.size, ar2.allocated, ar2.maximum_size);
-	fprintf(stderr, "Final res = %u\n", dynar_cat(&ar2, ar.data, ar.size));
-	fprintf(stderr, "%zu %zu %zu\n", ar2.size, ar2.allocated, ar2.maximum_size);
-	dynar_destroy(&ar);
-/*	for (i = 0; i < 500; i++) {
-	fprintf(stderr, "res = %u\n", dynar_cat(&ar, "ahoj", random() % 5));
-	fprintf(stderr, "%zu %zu %zu\n", ar.size, ar.allocated, ar.maximum_size);
-	}
-
-	fprintf(stderr, "%zu %zu %zu\n", ar.size, ar.allocated, ar.maximum_size);
-	dynar_destroy(&ar);*/
-
-	exit(1);
 
 	qnetd_log_init(QNETD_LOG_TARGET_STDERR);
 

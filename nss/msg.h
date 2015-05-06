@@ -4,6 +4,8 @@
 #include <sys/types.h>
 #include <inttypes.h>
 
+#include "dynar.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -13,7 +15,7 @@ enum msg_type {
 	MSG_TYPE_PREINIT_REPLY = 1,
 };
 
-extern size_t	msg_create_preinit(char *msg, size_t msg_len, const char *cluster_name,
+extern size_t	msg_create_preinit(struct dynar *msg, const char *cluster_name,
     uint32_t msg_seq_number);
 
 #ifdef __cplusplus
