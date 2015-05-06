@@ -44,10 +44,44 @@ static void qnetd_err_nss(void) {
 	exit(1);
 }
 
-void
+/*
+ * -1 means end of connection (EOF) or some other unhandled error. 0 = success
+ */
+int
 qnetd_client_net_read(struct qnetd_client *client)
 {
-	fprintf(stderr, "Client message received\n");
+	char buf[255];
+	PRInt32 readed;
+
+	readed = PR_Recv(client->socket, buf, sizeof(buf), 0, PR_INTERVAL_NO_TIMEOUT);
+	if (readed > 0) {
+		uint16_t opt_type;
+		uint32_t mlen;
+		char test[255];
+
+		PR_NetAddrToString(&client->addr, test, 255);
+
+		printf("Client %s readed %u bytes\n", test, readed);
+
+		memcpy(&opt_type, buf, sizeof(opt_type));
+		opt_type = ntohs(opt_type);
+		memcpy(&mlen, buf + 2, sizeof(mlen));
+		mlen = ntohl(mlen);
+		printf("type %u len %u\n", opt_type, mlen);
+
+	}
+
+	if (readed == 0) {
+		return (-1);
+	}
+
+	if (readed < 0 && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
+		qnetd_log_nss(LOG_ERR, "Unhandled error when reading from client");
+
+		return (-1);
+	}
+
+	return (0);
 }
 
 int
@@ -76,10 +110,18 @@ qnetd_client_accept(struct qnetd_instance *instance)
 	return (0);
 }
 
+void
+qnetd_client_terminate(struct qnetd_instance *instance, struct qnetd_client *client)
+{
+
+	qnetd_clients_list_del(&instance->clients, client);
+}
+
 int
 qnetd_poll(struct qnetd_instance *instance)
 {
 	struct qnetd_client *client;
+	struct qnetd_client *client_next;
 	PRPollDesc *pfds;
 	PRInt32 poll_res;
 	int i;
@@ -105,8 +147,10 @@ qnetd_poll(struct qnetd_instance *instance)
 			if (i > 0) {
 				if (i == 1) {
 					client = TAILQ_FIRST(&instance->clients);
+					client_next = TAILQ_NEXT(client, entries);
 				} else {
-					client = TAILQ_NEXT(client, entries);
+					client = client_next;
+					client_next = TAILQ_NEXT(client, entries);
 				}
 			}
 
@@ -114,7 +158,9 @@ qnetd_poll(struct qnetd_instance *instance)
 				if (i == 0) {
 					qnetd_client_accept(instance);
 				} else {
-					qnetd_client_net_read(client);
+					if (qnetd_client_net_read(client) == -1) {
+						qnetd_client_terminate(instance, client);
+					}
 				}
 			}
 
@@ -127,7 +173,7 @@ qnetd_poll(struct qnetd_instance *instance)
 					return (-1);
 
 				} else {
-//					qnetd_client_poll_err(client);
+					qnetd_client_terminate(instance, client);
 				}
 			}
 		}
