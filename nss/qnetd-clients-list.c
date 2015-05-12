@@ -15,7 +15,8 @@ qnetd_clients_list_init(struct qnetd_clients_list *clients_list)
 }
 
 struct qnetd_client *
-qnetd_clients_list_add(struct qnetd_clients_list *clients_list, PRFileDesc *socket, PRNetAddr *addr)
+qnetd_clients_list_add(struct qnetd_clients_list *clients_list, PRFileDesc *socket, PRNetAddr *addr,
+	size_t max_receive_size, size_t max_send_size)
 {
 	struct qnetd_client *client;
 
@@ -24,7 +25,7 @@ qnetd_clients_list_add(struct qnetd_clients_list *clients_list, PRFileDesc *sock
 		return (NULL);
 	}
 
-	qnetd_client_init(client, socket, addr);
+	qnetd_client_init(client, socket, addr, max_receive_size, max_send_size);
 
 	TAILQ_INSERT_TAIL(clients_list, client, entries);
 

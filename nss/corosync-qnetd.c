@@ -12,6 +12,7 @@
 #include <keyhi.h>
 #include <syslog.h>
 
+#include "msg.h"
 #include "nss-sock.h"
 #include "qnetd-client.h"
 #include "qnetd-clients-list.h"
@@ -22,9 +23,13 @@
 #define QNETD_HOST      NULL
 #define QNETD_PORT      4433
 #define QNETD_LISTEN_BACKLOG	10
+#define QNETD_MAX_CLIENT_SEND_SIZE	(1 << 15)
+#define QNETD_MAX_CLIENT_RECEIVE_SIZE	(1 << 15)
 
 #define NSS_DB_DIR	"nssdb"
 #define QNETD_CERT_NICKNAME	"QNetd Cert"
+
+#define QNETD_CLIENT_NET_LOCAL_READ_BUFFER	(1 << 10)
 
 struct qnetd_instance {
 	struct {
@@ -32,6 +37,8 @@ struct qnetd_instance {
 		CERTCertificate *cert;
 		SECKEYPrivateKey *private_key;
 	} server;
+	size_t max_client_receive_size;
+	size_t max_client_send_size;
 	struct qnetd_clients_list clients;
 	struct qnetd_poll_array poll_array;
 };
@@ -44,31 +51,82 @@ static void qnetd_err_nss(void) {
 	exit(1);
 }
 
+void
+qnetd_client_msg_received(struct qnetd_client *client)
+{
+
+}
+
 /*
  * -1 means end of connection (EOF) or some other unhandled error. 0 = success
  */
 int
 qnetd_client_net_read(struct qnetd_client *client)
 {
-	char buf[255];
+	char local_read_buffer[QNETD_CLIENT_NET_LOCAL_READ_BUFFER];
 	PRInt32 readed;
+	PRInt32 to_read;
 
-	readed = PR_Recv(client->socket, buf, sizeof(buf), 0, PR_INTERVAL_NO_TIMEOUT);
+	if (client->msg_already_received_bytes < msg_get_header_length()) {
+		/*
+		 * Complete reading of header
+		 */
+		to_read = msg_get_header_length() - client->msg_already_received_bytes;
+	} else {
+		/*
+		 * Read rest of message (or at least as much as possible)
+		 */
+		to_read = (msg_get_header_length() + msg_get_len(&client->receive_buffer)) -
+		    client->msg_already_received_bytes;
+		if (to_read > QNETD_CLIENT_NET_LOCAL_READ_BUFFER) {
+			to_read = QNETD_CLIENT_NET_LOCAL_READ_BUFFER;
+		}
+	}
+
+	readed = PR_Recv(client->socket, local_read_buffer, to_read, 0, PR_INTERVAL_NO_TIMEOUT);
 	if (readed > 0) {
-		uint16_t opt_type;
-		uint32_t mlen;
-		char test[255];
+		client->msg_already_received_bytes += readed;
 
-		PR_NetAddrToString(&client->addr, test, 255);
+		if (client->conn_state == QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_HEADER ||
+		    client->conn_state == QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_VALUE) {
+			if (dynar_cat(&client->receive_buffer, local_read_buffer, readed) == -1) {
+				qnetd_log(LOG_ERR, "Can't store message from client. Skipping message");
+				client->conn_state = QNETD_CLIENT_CONN_STATE_SKIPPING_MSG;
+			}
+		}
 
-		printf("Client %s readed %u bytes\n", test, readed);
+		if (client->conn_state == QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_HEADER) {
+			if (client->msg_already_received_bytes == msg_get_header_length()) {
+				client->conn_state = QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_VALUE;
 
-		memcpy(&opt_type, buf, sizeof(opt_type));
-		opt_type = ntohs(opt_type);
-		memcpy(&mlen, buf + 2, sizeof(mlen));
-		mlen = ntohl(mlen);
-		printf("type %u len %u\n", opt_type, mlen);
+				/*
+				 * Full header received. Check type, maximum size, ...
+				 */
+				if (!msg_is_valid_msg_type(&client->receive_buffer)) {
+					qnetd_log(LOG_WARNING, "Client sent unsupported msg type %u. Skipping message",
+					    msg_get_type(&client->receive_buffer));
 
+					client->conn_state = QNETD_CLIENT_CONN_STATE_SKIPPING_MSG;
+				}
+
+				if (msg_get_header_length() + msg_get_len(&client->receive_buffer) >
+				    dynar_max_size(&client->receive_buffer)) {
+					qnetd_log(LOG_WARNING,
+					    "Client wants to send too long message %u bytes. Skipping message",
+					    msg_get_len(&client->receive_buffer));
+
+					client->conn_state = QNETD_CLIENT_CONN_STATE_SKIPPING_MSG;
+				}
+			}
+		} else {
+			if (client->msg_already_received_bytes ==
+			    (msg_get_header_length() + msg_get_len(&client->receive_buffer))) {
+				/*
+				 * Full message received
+				 */
+				fprintf(stderr, "FULL MESSAGE RECEIVED\n");
+			}
+		}
 	}
 
 	if (readed == 0) {
@@ -101,7 +159,8 @@ qnetd_client_accept(struct qnetd_instance *instance)
 		return (-1);
 	}
 
-	client = qnetd_clients_list_add(&instance->clients, client_socket, &client_addr);
+	client = qnetd_clients_list_add(&instance->clients, client_socket, &client_addr,
+	    instance->max_client_receive_size, instance->max_client_send_size);
 	if (client == NULL) {
 		qnetd_log(LOG_ERR, "Can't add client to list");
 		return (-2);
@@ -200,12 +259,17 @@ qnetd_instance_init_certs(struct qnetd_instance *instance)
 }
 
 int
-qnetd_instance_init(struct qnetd_instance *instance)
+qnetd_instance_init(struct qnetd_instance *instance, size_t max_client_receive_size,
+    size_t max_client_send_size)
 {
 
 	memset(instance, 0, sizeof(*instance));
+
 	qnetd_poll_array_init(&instance->poll_array);
 	qnetd_clients_list_init(&instance->clients);
+
+	instance->max_client_receive_size = max_client_receive_size;
+	instance->max_client_send_size = max_client_send_size;
 
 	return (0);
 }
@@ -225,7 +289,7 @@ int main(void)
 		qnetd_err_nss();
 	}
 
-	if (qnetd_instance_init(&instance) == -1) {
+	if (qnetd_instance_init(&instance, QNETD_MAX_CLIENT_RECEIVE_SIZE, QNETD_MAX_CLIENT_SEND_SIZE) == -1) {
 		errx(1, "Can't initialize qnetd");
 	}
 
