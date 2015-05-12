@@ -26,7 +26,7 @@ msg_add_type(struct dynar *msg, enum msg_type type)
 }
 
 enum msg_type
-msg_get_type(struct dynar *msg)
+msg_get_type(const struct dynar *msg)
 {
 	uint16_t ntype;
 	uint16_t type;
@@ -60,7 +60,7 @@ msg_set_len(struct dynar *msg, uint32_t len)
 }
 
 uint32_t
-msg_get_len(struct dynar *msg)
+msg_get_len(const struct dynar *msg)
 {
 	uint32_t nlen;
 	uint32_t len;
@@ -98,7 +98,7 @@ small_buf_err:
 }
 
 int
-msg_is_valid_msg_type(struct dynar *msg)
+msg_is_valid_msg_type(const struct dynar *msg)
 {
 	enum msg_type type;
 	int res;

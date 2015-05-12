@@ -29,21 +29,21 @@ dynar_clean(struct dynar *array)
 }
 
 size_t
-dynar_size(struct dynar *array)
+dynar_size(const struct dynar *array)
 {
 
 	return (array->size);
 }
 
 size_t
-dynar_max_size(struct dynar *array)
+dynar_max_size(const struct dynar *array)
 {
 
 	return (array->maximum_size);
 }
 
 char *
-dynar_data(struct dynar *array)
+dynar_data(const struct dynar *array)
 {
 
 	return (array->data);
