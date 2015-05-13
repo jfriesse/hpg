@@ -2,9 +2,13 @@
 #include <arpa/inet.h>
 
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "tlv.h"
+
+#define TLV_TYPE_LENGTH		2
+#define TLV_LENGTH_LENGTH	2
 
 int
 tlv_add(struct dynar *msg, enum tlv_opt_type opt_type, uint16_t opt_len, const void *value)
@@ -52,4 +56,119 @@ int
 tlv_add_cluster_name(struct dynar *msg, const char *cluster_name)
 {
 	return (tlv_add_string(msg, TLV_OPT_CLUSTER_NAME, cluster_name));
+}
+
+void
+tlv_iter_init(const struct dynar *msg, size_t msg_header_len, struct tlv_iterator *tlv_iter)
+{
+	tlv_iter->msg = msg;
+	tlv_iter->current_pos = 0;
+	tlv_iter->msg_header_len = msg_header_len;
+}
+
+enum tlv_opt_type
+tlv_iter_get_type(const struct tlv_iterator *tlv_iter)
+{
+	uint16_t ntype;
+	uint16_t type;
+
+	memcpy(&ntype, dynar_data(tlv_iter->msg) + tlv_iter->current_pos, sizeof(ntype));
+	type = ntohs(ntype);
+
+	return (type);
+}
+
+uint16_t
+tlv_iter_get_len(const struct tlv_iterator *tlv_iter)
+{
+	uint16_t nlen;
+	uint16_t len;
+
+	memcpy(&nlen, dynar_data(tlv_iter->msg) + tlv_iter->current_pos + TLV_TYPE_LENGTH, sizeof(nlen));
+	len = ntohs(nlen);
+
+	return (len);
+}
+
+const char *
+tlv_iter_get_data(const struct tlv_iterator *tlv_iter)
+{
+
+	return (dynar_data(tlv_iter->msg) + tlv_iter->current_pos + TLV_TYPE_LENGTH + TLV_LENGTH_LENGTH);
+}
+
+int
+tlv_iter_next(struct tlv_iterator *tlv_iter)
+{
+	uint16_t len;
+
+	if (tlv_iter->current_pos == 0) {
+		tlv_iter->current_pos = tlv_iter->msg_header_len;
+
+		goto check_tlv_validity;
+	}
+
+	len = tlv_iter_get_len(tlv_iter);
+
+	if (tlv_iter->current_pos + TLV_TYPE_LENGTH + TLV_LENGTH_LENGTH + len >= dynar_size(tlv_iter->msg)) {
+		return (0);
+	}
+
+	tlv_iter->current_pos += TLV_TYPE_LENGTH + TLV_LENGTH_LENGTH + len;
+
+check_tlv_validity:
+	/*
+	 * Check if tlv is valid = is not larger than whole message
+	 */
+	len = tlv_iter_get_len(tlv_iter);
+
+	if (tlv_iter->current_pos + TLV_TYPE_LENGTH + TLV_LENGTH_LENGTH + len > dynar_size(tlv_iter->msg)) {
+		return (-1);
+	}
+
+	return (1);
+}
+
+int
+tlv_iter_decode_u32(struct tlv_iterator *tlv_iter, uint32_t *res)
+{
+	const char *opt_data;
+	uint16_t opt_len;
+	uint32_t nu32;
+
+	opt_len = tlv_iter_get_len(tlv_iter);
+	opt_data = tlv_iter_get_data(tlv_iter);
+
+	if (opt_len != sizeof(nu32)) {
+		return (-1);
+	}
+
+	memcpy(&nu32, opt_data, sizeof(nu32));
+	*res = ntohl(nu32);
+
+	return (0);
+}
+
+int
+tlv_iter_decode_str(struct tlv_iterator *tlv_iter, char **str, size_t *str_len)
+{
+	const char *opt_data;
+	uint16_t opt_len;
+	char *tmp_str;
+
+	opt_len = tlv_iter_get_len(tlv_iter);
+	opt_data = tlv_iter_get_data(tlv_iter);
+
+	tmp_str = malloc(opt_len + 1);
+	if (tmp_str == NULL) {
+		return (-1);
+	}
+
+	memcpy(tmp_str, opt_data, opt_len);
+	tmp_str[opt_len] = '\0';
+
+	*str = tmp_str;
+	*str_len = opt_len;
+
+	return (0);
 }

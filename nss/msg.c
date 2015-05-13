@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "msg.h"
@@ -117,4 +118,73 @@ msg_is_valid_msg_type(const struct dynar *msg)
 	}
 
 	return (res);
+}
+
+void
+msg_decoded_init(struct msg_decoded *decoded_msg)
+{
+
+	memset(decoded_msg, 0, sizeof(*decoded_msg));
+}
+
+void
+msg_decoded_destroy(struct msg_decoded *decoded_msg)
+{
+
+	free(decoded_msg->cluster_name);
+	free(decoded_msg->supported_messages);
+	free(decoded_msg->supported_options);
+
+	msg_decoded_init(decoded_msg);
+}
+
+/*
+ *  0 - No error
+ * -1 - option with invalid length
+ * -2 - Unable to allocate memory
+ * -3 - Inconsistent msg (tlv len > msg size)
+ */
+int
+msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
+{
+	struct tlv_iterator tlv_iter;
+	enum tlv_opt_type opt_type;
+	int iter_res;
+
+	msg_decoded_destroy(decoded_msg);
+
+	decoded_msg->type = msg_get_type(msg);
+
+	tlv_iter_init(msg, msg_get_header_length(), &tlv_iter);
+
+	while ((iter_res = tlv_iter_next(&tlv_iter)) > 0) {
+		opt_type = tlv_iter_get_type(&tlv_iter);
+
+		switch (opt_type) {
+		case TLV_OPT_MSG_SEQ_NUMBER:
+			if (tlv_iter_decode_u32(&tlv_iter, &decoded_msg->seq_number) != 0) {
+				return (-1);
+			}
+
+			decoded_msg->seq_number_set = 1;
+			break;
+		case TLV_OPT_CLUSTER_NAME:
+			if (tlv_iter_decode_str(&tlv_iter, &decoded_msg->cluster_name,
+			    &decoded_msg->cluster_name_len) != 0) {
+				return (-2);
+			}
+			break;
+		default:
+			/*
+			 * Unknown option
+			 */
+			break;
+		}
+	}
+
+	if (iter_res != 0) {
+		return (-3);
+	}
+
+	return (0);
 }

@@ -52,184 +52,25 @@ static void qnetd_err_nss(void) {
 	exit(1);
 }
 
-struct msg_decoded {
-	enum msg_type type;
-	char seq_number_set;
-	uint32_t seq_number;		// Only valid if seq_number_set != 0
-	size_t cluster_name_len;
-	char *cluster_name;		// Valid only if != NULL. Trailing \0 is added but not counted in cluster_name_len
-	char tls_supported_set;
-	char tls_supported;		// Valid only if tls_supported_set != 0
-	size_t no_supported_messages;
-	uint16_t *supported_messages;	// Valid only if != NULL
-	size_t no_supported_options;
-	uint16_t *supported_options;	// Valid only if != NULL
-	char reply_error_code_set;
-	char reply_error_code;		// Valid only if reply_error_code_set != 0
-};
-
 void
-msg_decoded_init(struct msg_decoded *decoded_msg)
+qnetd_client_log_msg_decode_error(int ret)
 {
 
-	memset(decoded_msg, 0, sizeof(*decoded_msg));
-}
-
-void
-msg_decoded_destroy(struct msg_decoded *decoded_msg)
-{
-
-	free(decoded_msg->cluster_name);
-	free(decoded_msg->supported_messages);
-	free(decoded_msg->supported_options);
-
-	msg_decoded_init(decoded_msg);
-}
-
-#define TLV_TYPE_LENGTH		2
-#define TLV_LENGTH_LENGTH	2
-
-struct tlv_iterator {
-	const struct dynar *msg;
-	size_t current_pos;
-};
-
-void
-tlv_iter_init(const struct dynar *msg, struct tlv_iterator *tlv_iter)
-{
-	tlv_iter->msg = msg;
-	tlv_iter->current_pos = 0;
-}
-
-enum tlv_opt_type
-tlv_iter_get_type(const struct tlv_iterator *tlv_iter)
-{
-	uint16_t ntype;
-	uint16_t type;
-
-	memcpy(&ntype, dynar_data(tlv_iter->msg) + tlv_iter->current_pos, sizeof(ntype));
-	type = ntohs(ntype);
-
-	return (type);
-}
-
-uint16_t
-tlv_iter_get_len(const struct tlv_iterator *tlv_iter)
-{
-	uint16_t nlen;
-	uint16_t len;
-
-	memcpy(&nlen, dynar_data(tlv_iter->msg) + tlv_iter->current_pos + TLV_TYPE_LENGTH, sizeof(nlen));
-	len = ntohs(nlen);
-
-	return (len);
-}
-
-const char *
-tlv_iter_get_data(const struct tlv_iterator *tlv_iter)
-{
-
-	return (dynar_data(tlv_iter->msg) + tlv_iter->current_pos + TLV_TYPE_LENGTH + TLV_LENGTH_LENGTH);
-}
-
-int
-tlv_iter_next(struct tlv_iterator *tlv_iter)
-{
-	uint16_t len;
-
-	if (tlv_iter->current_pos == 0) {
-		tlv_iter->current_pos = msg_get_header_length();
-
-		goto check_tlv_validity;
+	switch (ret) {
+	case -1:
+		qnetd_log(LOG_WARNING, "Received message with option with invalid length");
+		break;
+	case -2:
+		qnetd_log(LOG_CRIT, "Can't allocate memory");
+		break;
+	case -3:
+		qnetd_log(LOG_WARNING, "Received inconsistent msg (tlv len > msg size)");
+		break;
+	default:
+		qnetd_log(LOG_ERR, "Unknown error occured when decoding message");
+		break;
 	}
-
-	len = tlv_iter_get_len(tlv_iter);
-
-	if (tlv_iter->current_pos + TLV_TYPE_LENGTH + TLV_LENGTH_LENGTH + len >= dynar_size(tlv_iter->msg)) {
-		return (0);
-	}
-
-	tlv_iter->current_pos += TLV_TYPE_LENGTH + TLV_LENGTH_LENGTH + len;
-
-check_tlv_validity:
-	/*
-	 * Check if tlv is valid = is not larger than whole message
-	 */
-	len = tlv_iter_get_len(tlv_iter);
-
-	if (tlv_iter->current_pos + TLV_TYPE_LENGTH + TLV_LENGTH_LENGTH + len > dynar_size(tlv_iter->msg)) {
-		return (-1);
-	}
-
-	return (1);
 }
-
-int
-msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
-{
-	struct tlv_iterator tlv_iter;
-	uint16_t opt_len;
-	enum tlv_opt_type opt_type;
-	const char *opt_data;
-	int iter_res;
-	uint32_t nu32, u32;
-	char *str;
-
-	msg_decoded_destroy(decoded_msg);
-
-	decoded_msg->type = msg_get_type(msg);
-
-	tlv_iter_init(msg, &tlv_iter);
-
-	while ((iter_res = tlv_iter_next(&tlv_iter)) > 0) {
-		opt_len = tlv_iter_get_len(&tlv_iter);
-		opt_type = tlv_iter_get_type(&tlv_iter);
-		opt_data = tlv_iter_get_data(&tlv_iter);
-
-		switch (opt_type) {
-		case TLV_OPT_MSG_SEQ_NUMBER:
-			if (opt_len != sizeof(nu32)) {
-				qnetd_log(LOG_WARNING, "Received SEQ_NUMBER option with length != %zu. Sending back error",
-				    sizeof(nu32));
-			}
-
-			memcpy(&nu32, opt_data, sizeof(nu32));
-			u32 = ntohl(nu32);
-
-			decoded_msg->seq_number_set = 1;
-			decoded_msg->seq_number = u32;
-			break;
-		case TLV_OPT_CLUSTER_NAME:
-			str = malloc(opt_len + 1);
-			if (str == NULL) {
-				qnetd_log(LOG_CRIT, "Can't allocate memory. Sending back error");
-
-				return (-1);
-			}
-			memcpy(str, opt_data, opt_len);
-			str[opt_len] = '\0';
-
-			decoded_msg->cluster_name = str;
-			decoded_msg->cluster_name_len = opt_len;
-			break;
-		default:
-			/*
-			 * Unknown option
-			 */
-			qnetd_log(LOG_DEBUG, "Received unsupported option %u. Skipping it", opt_type);
-			break;
-		}
-	}
-
-	if (iter_res != 0) {
-		qnetd_log(LOG_WARNING, "Received inconsistent msg (tlv len > msg size). Sending back error");
-
-		return (-1);
-	}
-
-	return (0);
-}
-
 
 void
 qnetd_client_msg_received(struct qnetd_client *client)
@@ -240,11 +81,12 @@ qnetd_client_msg_received(struct qnetd_client *client)
 	msg_decoded_init(&msg);
 
 	res = msg_decode(&client->receive_buffer, &msg);
-	if (res == -1) {
+	if (res != 0) {
 		/*
 		 * Error occurred. Send server error.
 		 */
-		fprintf(stderr, "Sending back error message\n");
+		qnetd_client_log_msg_decode_error(res);
+		qnetd_log(LOG_INFO, "Sending back error message");
 	}
 
 	switch (msg.type) {
