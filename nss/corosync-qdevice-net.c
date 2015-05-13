@@ -57,7 +57,7 @@ int main(void)
 	/*
 	 * Create and send preinit message to qnetd
 	 */
-	msg_len = msg_create_preinit(&msg, "Cluster", 1);
+	msg_len = msg_create_preinit(&msg, "Cluster", 1, 1);
 	if (msg_len == 0) {
 		errx(1, "Can't allocate buffer");
 	}

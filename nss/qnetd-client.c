@@ -17,6 +17,14 @@ qnetd_client_init(struct qnetd_client *client, PRFileDesc *socket, PRNetAddr *ad
 	dynar_init(&client->send_buffer, max_send_size);
 }
 
+void
+qnetd_client_destroy(struct qnetd_client *client)
+{
+
+	dynar_destroy(&client->receive_buffer);
+	dynar_destroy(&client->send_buffer);
+}
+
 PRInt16
 qnetd_client_conn_state_to_poll_event(enum qnetd_client_conn_state state)
 {

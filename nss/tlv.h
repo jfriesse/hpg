@@ -13,6 +13,13 @@ extern "C" {
 enum tlv_opt_type {
 	TLV_OPT_MSG_SEQ_NUMBER = 0,
 	TLV_OPT_CLUSTER_NAME = 1,
+	TLV_OPT_TLS_SUPPORTED = 2,
+};
+
+enum tlv_tls_supported {
+	TLV_TLS_UNSUPPORTED = 0,
+	TLV_TLS_SUPPORTED = 1,
+	TLV_TLS_REQUIRED = 2,
 };
 
 struct tlv_iterator {
@@ -31,6 +38,8 @@ extern int			 tlv_add_string(struct dynar *msg, enum tlv_opt_type opt_type, cons
 extern int			 tlv_add_msg_seq_number(struct dynar *msg, uint32_t msg_seq_number);
 
 extern int			 tlv_add_cluster_name(struct dynar *msg, const char *cluster_name);
+
+extern int			 tlv_add_tls_supported(struct dynar *msg, enum tlv_tls_supported tls_supported);
 
 extern void			 tlv_iter_init(const struct dynar *msg, size_t msg_header_len,
     struct tlv_iterator *tlv_iter);

@@ -35,6 +35,8 @@ struct qnetd_client {
 extern void		qnetd_client_init(struct qnetd_client *client, PRFileDesc *socket, PRNetAddr *addr,
     size_t max_receive_size, size_t max_send_size);
 
+extern void		qnetd_client_destroy(struct qnetd_client *client);
+
 extern PRInt16		qnetd_client_conn_state_to_poll_event(enum qnetd_client_conn_state state);
 
 #ifdef __cplusplus

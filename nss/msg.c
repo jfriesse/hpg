@@ -6,7 +6,6 @@
 #include <string.h>
 
 #include "msg.h"
-#include "tlv.h"
 
 #define MSG_TYPE_LENGTH		2
 #define MSG_LENGTH_LENGTH	4
@@ -74,7 +73,7 @@ msg_get_len(const struct dynar *msg)
 
 
 size_t
-msg_create_preinit(struct dynar *msg, const char *cluster_name, uint32_t msg_seq_number)
+msg_create_preinit(struct dynar *msg, const char *cluster_name, int add_msg_seq_number, uint32_t msg_seq_number)
 {
 
 	dynar_clean(msg);
@@ -82,11 +81,41 @@ msg_create_preinit(struct dynar *msg, const char *cluster_name, uint32_t msg_seq
 	msg_add_type(msg, MSG_TYPE_PREINIT);
 	msg_add_len(msg);
 
-	if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
-		goto small_buf_err;
+	if (add_msg_seq_number) {
+		if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
+			goto small_buf_err;
+		}
 	}
 
 	if (tlv_add_cluster_name(msg, cluster_name) == -1) {
+		goto small_buf_err;
+	}
+
+	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
+
+	return (dynar_size(msg));
+
+small_buf_err:
+	return (0);
+}
+
+size_t
+msg_create_preinit_reply(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
+    enum tlv_tls_supported tls_supported)
+{
+
+	dynar_clean(msg);
+
+	msg_add_type(msg, MSG_TYPE_PREINIT_REPLY);
+	msg_add_len(msg);
+
+	if (add_msg_seq_number) {
+		if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (tlv_add_tls_supported(msg, tls_supported) == -1) {
 		goto small_buf_err;
 	}
 

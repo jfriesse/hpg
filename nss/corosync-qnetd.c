@@ -30,7 +30,7 @@
 #define NSS_DB_DIR	"nssdb"
 #define QNETD_CERT_NICKNAME	"QNetd Cert"
 
-#define QNETD_CLIENT_NET_LOCAL_READ_BUFFER	(1 << 10)
+#define QNETD_CLIENT_NET_LOCAL_NET_BUFFER	(1 << 10)
 
 struct qnetd_instance {
 	struct {
@@ -42,6 +42,7 @@ struct qnetd_instance {
 	size_t max_client_send_size;
 	struct qnetd_clients_list clients;
 	struct qnetd_poll_array poll_array;
+	enum tlv_tls_supported tls_supported;
 };
 
 
@@ -72,8 +73,26 @@ qnetd_client_log_msg_decode_error(int ret)
 	}
 }
 
+int
+qnetd_client_net_schedule_send(struct qnetd_client *client)
+{
+	if (client->conn_state != QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_VALUE &&
+	    client->conn_state != QNETD_CLIENT_CONN_STATE_SKIPPING_MSG) {
+		/*
+		 * Client is already sending msg, doing handshake or it doesn't received
+		 * full header
+		 */
+		return (-1);
+	}
+
+	client->msg_already_sent_bytes = 0;
+	client->conn_state = QNETD_CLIENT_CONN_STATE_SENDING_MSG;
+
+	return (0);
+}
+
 void
-qnetd_client_msg_received(struct qnetd_client *client)
+qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *client)
 {
 	struct msg_decoded msg;
 	int res;
@@ -91,7 +110,17 @@ qnetd_client_msg_received(struct qnetd_client *client)
 
 	switch (msg.type) {
 	case MSG_TYPE_PREINIT:
-		fprintf(stderr, "PREINIT\n");
+		if (msg_create_preinit_reply(&client->send_buffer, msg.seq_number_set, msg.seq_number,
+		    instance->tls_supported) == 0) {
+			qnetd_log(LOG_ERR, "Can't alloc preinit reply msg. Terminating client connection.");
+
+			// TODO
+		};
+
+		if (qnetd_client_net_schedule_send(client) != 0) {
+			qnetd_log(LOG_ERR, "Can't schedule send of message");
+		}
+
 		break;
 	case MSG_TYPE_PREINIT_REPLY:
 		fprintf(stderr, "PREINIT reply\n");
@@ -108,9 +137,52 @@ qnetd_client_msg_received(struct qnetd_client *client)
  * -1 means end of connection (EOF) or some other unhandled error. 0 = success
  */
 int
-qnetd_client_net_read(struct qnetd_client *client)
+qnetd_client_net_write(struct qnetd_instance *instance, struct qnetd_client *client)
 {
-	char local_read_buffer[QNETD_CLIENT_NET_LOCAL_READ_BUFFER];
+	PRInt32 sent;
+	PRInt32 to_send;
+
+	to_send = dynar_size(&client->send_buffer) - client->msg_already_sent_bytes;
+	if (to_send > QNETD_CLIENT_NET_LOCAL_NET_BUFFER) {
+		to_send = QNETD_CLIENT_NET_LOCAL_NET_BUFFER;
+	}
+
+	sent = PR_Send(client->socket, dynar_data(&client->send_buffer) + client->msg_already_sent_bytes,
+	    to_send, 0, PR_INTERVAL_NO_TIMEOUT);
+
+	if (sent > 0) {
+		client->msg_already_sent_bytes += sent;
+
+		if (client->msg_already_sent_bytes == dynar_size(&client->send_buffer)) {
+			/*
+			 * All data sent
+			 */
+			client->conn_state = QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_HEADER;
+		}
+	}
+
+	if (sent == 0) {
+		qnetd_log_nss(LOG_CRIT, "PR_Send returned 0");
+
+		return (-1);
+	}
+
+	if (sent < 0 && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
+		qnetd_log_nss(LOG_ERR, "Unhandled error when sending to client");
+
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * -1 means end of connection (EOF) or some other unhandled error. 0 = success
+ */
+int
+qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *client)
+{
+	char local_read_buffer[QNETD_CLIENT_NET_LOCAL_NET_BUFFER];
 	PRInt32 readed;
 	PRInt32 to_read;
 
@@ -125,8 +197,8 @@ qnetd_client_net_read(struct qnetd_client *client)
 		 */
 		to_read = (msg_get_header_length() + msg_get_len(&client->receive_buffer)) -
 		    client->msg_already_received_bytes;
-		if (to_read > QNETD_CLIENT_NET_LOCAL_READ_BUFFER) {
-			to_read = QNETD_CLIENT_NET_LOCAL_READ_BUFFER;
+		if (to_read > QNETD_CLIENT_NET_LOCAL_NET_BUFFER) {
+			to_read = QNETD_CLIENT_NET_LOCAL_NET_BUFFER;
 		}
 	}
 
@@ -172,7 +244,7 @@ qnetd_client_net_read(struct qnetd_client *client)
 				 * Full message received
 				 */
 				fprintf(stderr, "FULL MESSAGE RECEIVED\n");
-				qnetd_client_msg_received(client);
+				qnetd_client_msg_received(instance, client);
 			}
 		}
 	}
@@ -221,6 +293,7 @@ void
 qnetd_client_terminate(struct qnetd_instance *instance, struct qnetd_client *client)
 {
 
+	PR_Close(client->socket);
 	qnetd_clients_list_del(&instance->clients, client);
 }
 
@@ -232,8 +305,10 @@ qnetd_poll(struct qnetd_instance *instance)
 	PRPollDesc *pfds;
 	PRInt32 poll_res;
 	int i;
+	int terminate_client;
 
 	client = NULL;
+	terminate_client = 0;
 
 	pfds = qnetd_poll_array_create_from_clients_list(&instance->poll_array,
 	    &instance->clients, instance->server.socket, PR_POLL_READ);
@@ -265,8 +340,26 @@ qnetd_poll(struct qnetd_instance *instance)
 				if (i == 0) {
 					qnetd_client_accept(instance);
 				} else {
-					if (qnetd_client_net_read(client) == -1) {
-						qnetd_client_terminate(instance, client);
+					if (qnetd_client_net_read(instance, client) == -1) {
+						fprintf(stderr, "Client terminate 1\n");
+						terminate_client = 1;
+					}
+				}
+			}
+
+			if (pfds[i].out_flags & PR_POLL_WRITE) {
+				if (i == 0) {
+					/*
+					 * Poll write on listen socket -> fatal error
+					 */
+					qnetd_log(LOG_CRIT, "POLL_WRITE on listening socket");
+
+					return (-1);
+				} else {
+					fprintf(stderr, "net write");
+					if (qnetd_client_net_write(instance, client) == -1) {
+						fprintf(stderr, "Client terminate 2 \n");
+						terminate_client = 1;
 					}
 				}
 			}
@@ -277,11 +370,21 @@ qnetd_poll(struct qnetd_instance *instance)
 					 * Poll ERR on listening socket is fatal error
 					 */
 					qnetd_log(LOG_CRIT, "POLL_ERR (%u) on listening socket", pfds[i].out_flags);
+
 					return (-1);
 
 				} else {
-					qnetd_client_terminate(instance, client);
+					fprintf(stderr, "Client terminate 3\n");
+
+					terminate_client = 1;
 				}
+			}
+
+			/*
+			 * If client is scheduled for termination, terminate it
+			 */
+			if (terminate_client) {
+				qnetd_client_terminate(instance, client);
 			}
 		}
 	}

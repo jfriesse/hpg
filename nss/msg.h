@@ -5,6 +5,7 @@
 #include <inttypes.h>
 
 #include "dynar.h"
+#include "tlv.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,7 +23,7 @@ struct msg_decoded {
 	size_t cluster_name_len;
 	char *cluster_name;		// Valid only if != NULL. Trailing \0 is added but not counted in cluster_name_len
 	char tls_supported_set;
-	char tls_supported;		// Valid only if tls_supported_set != 0
+	enum tlv_tls_supported tls_supported;	// Valid only if tls_supported_set != 0.
 	size_t no_supported_messages;
 	uint16_t *supported_messages;	// Valid only if != NULL
 	size_t no_supported_options;
@@ -32,7 +33,10 @@ struct msg_decoded {
 };
 
 extern size_t		msg_create_preinit(struct dynar *msg, const char *cluster_name,
-    uint32_t msg_seq_number);
+    int add_msg_seq_number, uint32_t msg_seq_number);
+
+extern size_t		msg_create_preinit_reply(struct dynar *msg, int add_msg_seq_number,
+    uint32_t msg_seq_number, enum tlv_tls_supported tls_supported);
 
 extern size_t		msg_get_header_length(void);
 

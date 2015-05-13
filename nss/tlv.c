@@ -41,26 +41,44 @@ tlv_add_u32(struct dynar *msg, enum tlv_opt_type opt_type, uint32_t u32)
 }
 
 int
+tlv_add_u8(struct dynar *msg, enum tlv_opt_type opt_type, uint8_t u8)
+{
+
+	return (tlv_add(msg, opt_type, sizeof(u8), &u8));
+}
+
+int
 tlv_add_string(struct dynar *msg, enum tlv_opt_type opt_type, const char *str)
 {
+
 	return (tlv_add(msg, opt_type, strlen(str), str));
 }
 
 int
 tlv_add_msg_seq_number(struct dynar *msg, uint32_t msg_seq_number)
 {
+
 	return (tlv_add_u32(msg, TLV_OPT_MSG_SEQ_NUMBER, msg_seq_number));
 }
 
 int
 tlv_add_cluster_name(struct dynar *msg, const char *cluster_name)
 {
+
 	return (tlv_add_string(msg, TLV_OPT_CLUSTER_NAME, cluster_name));
+}
+
+int
+tlv_add_tls_supported(struct dynar *msg, enum tlv_tls_supported tls_supported)
+{
+
+	return (tlv_add_u8(msg, TLV_OPT_TLS_SUPPORTED, tls_supported));
 }
 
 void
 tlv_iter_init(const struct dynar *msg, size_t msg_header_len, struct tlv_iterator *tlv_iter)
 {
+
 	tlv_iter->msg = msg;
 	tlv_iter->current_pos = 0;
 	tlv_iter->msg_header_len = msg_header_len;
