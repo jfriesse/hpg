@@ -1,5 +1,7 @@
 #include "msgio.h"
 
+#define MSGIO_LOCAL_BUF_SIZE			(1 << 10)
+
 ssize_t
 msgio_send(PRFileDesc *socket, const char *msg, size_t msg_len, size_t *start_pos)
 {
@@ -47,4 +49,42 @@ msgio_send_blocking(PRFileDesc *socket, const char *msg, size_t msg_len)
 	}
 
 	return (ret);
+}
+
+/*
+ * -1 means send returned 0, -2  unhandled error. 0 = success but whole buffer is still not sent, 1 = all data was sent
+ */
+int
+msgio_write(PRFileDesc *socket, const struct dynar *msg, size_t *already_sent_bytes)
+{
+	PRInt32 sent;
+	PRInt32 to_send;
+
+	to_send = dynar_size(msg) - *already_sent_bytes;
+	if (to_send > MSGIO_LOCAL_BUF_SIZE) {
+		to_send = MSGIO_LOCAL_BUF_SIZE;
+	}
+
+	sent = PR_Send(socket, dynar_data(msg) + *already_sent_bytes, to_send, 0, PR_INTERVAL_NO_TIMEOUT);
+
+	if (sent > 0) {
+		*already_sent_bytes += sent;
+
+		if (*already_sent_bytes == dynar_size(msg)) {
+			/*
+			 * All data sent
+			 */
+			return (1);
+		}
+	}
+
+	if (sent == 0) {
+		return (-1);
+	}
+
+	if (sent < 0 && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
+		return (-2);
+	}
+
+	return (0);
 }

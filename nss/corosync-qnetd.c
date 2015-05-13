@@ -13,6 +13,7 @@
 #include <syslog.h>
 
 #include "msg.h"
+#include "msgio.h"
 #include "tlv.h"
 #include "nss-sock.h"
 #include "qnetd-client.h"
@@ -30,7 +31,7 @@
 #define NSS_DB_DIR	"nssdb"
 #define QNETD_CERT_NICKNAME	"QNetd Cert"
 
-#define QNETD_CLIENT_NET_LOCAL_NET_BUFFER	(1 << 10)
+#define QNETD_CLIENT_NET_LOCAL_NET_BUFFER	(16)
 
 struct qnetd_instance {
 	struct {
@@ -133,42 +134,27 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 	msg_decoded_destroy(&msg);
 }
 
-/*
- * -1 means end of connection (EOF) or some other unhandled error. 0 = success
- */
+
 int
 qnetd_client_net_write(struct qnetd_instance *instance, struct qnetd_client *client)
 {
-	PRInt32 sent;
-	PRInt32 to_send;
+	int res;
 
-	to_send = dynar_size(&client->send_buffer) - client->msg_already_sent_bytes;
-	if (to_send > QNETD_CLIENT_NET_LOCAL_NET_BUFFER) {
-		to_send = QNETD_CLIENT_NET_LOCAL_NET_BUFFER;
+	res = msgio_write(client->socket, &client->send_buffer, &client->msg_already_sent_bytes);
+
+	if (res == 1) {
+		client->conn_state = QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_HEADER;
+
 	}
 
-	sent = PR_Send(client->socket, dynar_data(&client->send_buffer) + client->msg_already_sent_bytes,
-	    to_send, 0, PR_INTERVAL_NO_TIMEOUT);
-
-	if (sent > 0) {
-		client->msg_already_sent_bytes += sent;
-
-		if (client->msg_already_sent_bytes == dynar_size(&client->send_buffer)) {
-			/*
-			 * All data sent
-			 */
-			client->conn_state = QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_HEADER;
-		}
-	}
-
-	if (sent == 0) {
+	if (res == -1) {
 		qnetd_log_nss(LOG_CRIT, "PR_Send returned 0");
 
 		return (-1);
 	}
 
-	if (sent < 0 && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
-		qnetd_log_nss(LOG_ERR, "Unhandled error when sending to client");
+	if (res == -2) {
+		qnetd_log_nss(LOG_ERR, "Unhandled error when sending message to client");
 
 		return (-1);
 	}
@@ -177,76 +163,78 @@ qnetd_client_net_write(struct qnetd_instance *instance, struct qnetd_client *cli
 }
 
 /*
- * -1 means end of connection (EOF) or some other unhandled error. 0 = success
+ * -1 End of connection
+ * -2 Unhandled error
+ * -3 Fatal error. Unable to store message header
+ * -4 Unable to store message
+ * -5 Invalid msg type
+ * -6 Msg too long
  */
 int
-qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *client)
+msgio_read(PRFileDesc *socket, struct dynar *msg, size_t *already_received_bytes, int *skipping_msg)
 {
 	char local_read_buffer[QNETD_CLIENT_NET_LOCAL_NET_BUFFER];
 	PRInt32 readed;
 	PRInt32 to_read;
+	int ret;
 
-	if (client->msg_already_received_bytes < msg_get_header_length()) {
+	ret = 0;
+
+	if (*already_received_bytes < msg_get_header_length()) {
 		/*
 		 * Complete reading of header
 		 */
-		to_read = msg_get_header_length() - client->msg_already_received_bytes;
+		to_read = msg_get_header_length() - *already_received_bytes;
 	} else {
 		/*
 		 * Read rest of message (or at least as much as possible)
 		 */
-		to_read = (msg_get_header_length() + msg_get_len(&client->receive_buffer)) -
-		    client->msg_already_received_bytes;
-		if (to_read > QNETD_CLIENT_NET_LOCAL_NET_BUFFER) {
-			to_read = QNETD_CLIENT_NET_LOCAL_NET_BUFFER;
-		}
+		to_read = (msg_get_header_length() + msg_get_len(msg)) - *already_received_bytes;
 	}
 
-	readed = PR_Recv(client->socket, local_read_buffer, to_read, 0, PR_INTERVAL_NO_TIMEOUT);
+	if (to_read > QNETD_CLIENT_NET_LOCAL_NET_BUFFER) {
+		to_read = QNETD_CLIENT_NET_LOCAL_NET_BUFFER;
+	}
+
+	readed = PR_Recv(socket, local_read_buffer, to_read, 0, PR_INTERVAL_NO_TIMEOUT);
 	if (readed > 0) {
-		client->msg_already_received_bytes += readed;
+		*already_received_bytes += readed;
 
-		if (client->conn_state == QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_HEADER ||
-		    client->conn_state == QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_VALUE) {
-			if (dynar_cat(&client->receive_buffer, local_read_buffer, readed) == -1) {
-				qnetd_log(LOG_ERR, "Can't store message from client. Skipping message");
-				client->conn_state = QNETD_CLIENT_CONN_STATE_SKIPPING_MSG;
+		if (!*skipping_msg) {
+			if (dynar_cat(msg, local_read_buffer, readed) == -1) {
+				*skipping_msg = 1;
+				ret = -4;
 			}
 		}
 
-		if (client->conn_state == QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_HEADER) {
-			if (client->msg_already_received_bytes == msg_get_header_length()) {
-				client->conn_state = QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_VALUE;
+		if (*skipping_msg && *already_received_bytes < msg_get_header_length()) {
+			/*
+			 * Fatal error. We were unable to store even message header
+			 */
+			return (-3);
+		}
 
-				/*
-				 * Full header received. Check type, maximum size, ...
-				 */
-				if (!msg_is_valid_msg_type(&client->receive_buffer)) {
-					qnetd_log(LOG_WARNING, "Client sent unsupported msg type %u. Skipping message",
-					    msg_get_type(&client->receive_buffer));
-
-					client->conn_state = QNETD_CLIENT_CONN_STATE_SKIPPING_MSG;
-				}
-
-				if (msg_get_header_length() + msg_get_len(&client->receive_buffer) >
-				    dynar_max_size(&client->receive_buffer)) {
-					qnetd_log(LOG_WARNING,
-					    "Client wants to send too long message %u bytes. Skipping message",
-					    msg_get_len(&client->receive_buffer));
-
-					client->conn_state = QNETD_CLIENT_CONN_STATE_SKIPPING_MSG;
-				}
-			}
-		} else {
-			if (client->msg_already_received_bytes ==
-			    (msg_get_header_length() + msg_get_len(&client->receive_buffer))) {
-				/*
-				 * Full message received
-				 */
-				fprintf(stderr, "FULL MESSAGE RECEIVED\n");
-				qnetd_client_msg_received(instance, client);
+		if (!*skipping_msg && *already_received_bytes == msg_get_header_length()) {
+			/*
+			 * Full header received. Check type, maximum size, ...
+			 */
+			if (!msg_is_valid_msg_type(msg)) {
+				*skipping_msg = 1;
+				ret = -5;
+			} else if (msg_get_header_length() + msg_get_len(msg) > dynar_max_size(msg)) {
+				*skipping_msg = 1;
+				ret = -6;
 			}
 		}
+
+		if (*already_received_bytes >= msg_get_header_length() &&
+		    *already_received_bytes == (msg_get_header_length() + msg_get_len(msg))) {
+			/*
+			 * Full message skipped or received
+			 */
+			ret = 1;
+		}
+
 	}
 
 	if (readed == 0) {
@@ -254,9 +242,72 @@ qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *clie
 	}
 
 	if (readed < 0 && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
+		return (-2);
+	}
+
+	return (ret);
+}
+
+/*
+ * -1 means end of connection (EOF) or some other unhandled error. 0 = success
+ */
+int
+qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *client)
+{
+	int res;
+	int skipping_msg;
+
+	skipping_msg = (client->conn_state == QNETD_CLIENT_CONN_STATE_SKIPPING_MSG);
+
+	res = msgio_read(client->socket, &client->receive_buffer, &client->msg_already_received_bytes, &skipping_msg);
+
+	if (skipping_msg) {
+		fprintf(stderr, "SKIPPING MSG\n");
+
+		client->conn_state = QNETD_CLIENT_CONN_STATE_SKIPPING_MSG;
+	}
+
+	if (res == -1) {
+		return (-1);
+	}
+
+	if (res == -2) {
 		qnetd_log_nss(LOG_ERR, "Unhandled error when reading from client");
 
 		return (-1);
+	}
+
+	if (res == -3) {
+		qnetd_log(LOG_ERR, "Can't store message header from client. Terminating client");
+
+		return (-1);
+	}
+
+	if (res == -4) {
+		qnetd_log(LOG_ERR, "Can't store message from client. Skipping message");
+	}
+
+	if (res == -5) {
+		qnetd_log(LOG_WARNING, "Client sent unsupported msg type %u. Skipping message",
+			    msg_get_type(&client->receive_buffer));
+	}
+
+	if (res == -6) {
+		qnetd_log(LOG_WARNING,
+		    "Client wants to send too long message %u bytes. Skipping message",
+		    msg_get_len(&client->receive_buffer));
+	}
+
+	if (res == 1) {
+		/*
+		 * Full message received
+		 */
+		if (!skipping_msg) {
+			fprintf(stderr, "FULL MESSAGE RECEIVED\n");
+			qnetd_client_msg_received(instance, client);
+		} else {
+			fprintf(stderr, "FULL MESSAGE SKIPPED\n");
+		}
 	}
 
 	return (0);
