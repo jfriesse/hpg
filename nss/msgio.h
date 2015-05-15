@@ -16,6 +16,8 @@ extern ssize_t	msgio_send_blocking(PRFileDesc *socket, const char *msg, size_t m
 
 extern int	msgio_write(PRFileDesc *socket, const struct dynar *msg, size_t *already_sent_bytes);
 
+extern int	msgio_read(PRFileDesc *socket, struct dynar *msg, size_t *already_received_bytes, int *skipping_msg);
+
 #ifdef __cplusplus
 }
 #endif

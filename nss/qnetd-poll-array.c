@@ -117,7 +117,10 @@ qnetd_poll_array_create_from_clients_list(struct qnetd_poll_array *poll_array,
 			return (NULL);
 		}
 		poll_desc->fd = client->socket;
-		poll_desc->in_flags = qnetd_client_conn_state_to_poll_event(client->conn_state);
+		poll_desc->in_flags = PR_POLL_READ;
+		if (client->sending_msg) {
+			poll_desc->in_flags |= PR_POLL_WRITE;
+		}
 		poll_desc->out_flags = 0;
 	}
 

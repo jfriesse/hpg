@@ -77,17 +77,15 @@ qnetd_client_log_msg_decode_error(int ret)
 int
 qnetd_client_net_schedule_send(struct qnetd_client *client)
 {
-	if (client->conn_state != QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_VALUE &&
-	    client->conn_state != QNETD_CLIENT_CONN_STATE_SKIPPING_MSG) {
+	if (client->sending_msg) {
 		/*
-		 * Client is already sending msg, doing handshake or it doesn't received
-		 * full header
+		 * Client is already sending msg
 		 */
 		return (-1);
 	}
 
 	client->msg_already_sent_bytes = 0;
-	client->conn_state = QNETD_CLIENT_CONN_STATE_SENDING_MSG;
+	client->sending_msg = 1;
 
 	return (0);
 }
@@ -113,7 +111,7 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 	case MSG_TYPE_PREINIT:
 		if (msg_create_preinit_reply(&client->send_buffer, msg.seq_number_set, msg.seq_number,
 		    instance->tls_supported) == 0) {
-			qnetd_log(LOG_ERR, "Can't alloc preinit reply msg. Terminating client connection.");
+			qnetd_log(LOG_ERR, "Can't alloc preinit reply msg. Disconnecting client connection.");
 
 			// TODO
 		};
@@ -143,7 +141,7 @@ qnetd_client_net_write(struct qnetd_instance *instance, struct qnetd_client *cli
 	res = msgio_write(client->socket, &client->send_buffer, &client->msg_already_sent_bytes);
 
 	if (res == 1) {
-		client->conn_state = QNETD_CLIENT_CONN_STATE_RECEIVING_MSG_HEADER;
+		client->sending_msg = 0;
 
 	}
 
@@ -162,91 +160,6 @@ qnetd_client_net_write(struct qnetd_instance *instance, struct qnetd_client *cli
 	return (0);
 }
 
-/*
- * -1 End of connection
- * -2 Unhandled error
- * -3 Fatal error. Unable to store message header
- * -4 Unable to store message
- * -5 Invalid msg type
- * -6 Msg too long
- */
-int
-msgio_read(PRFileDesc *socket, struct dynar *msg, size_t *already_received_bytes, int *skipping_msg)
-{
-	char local_read_buffer[QNETD_CLIENT_NET_LOCAL_NET_BUFFER];
-	PRInt32 readed;
-	PRInt32 to_read;
-	int ret;
-
-	ret = 0;
-
-	if (*already_received_bytes < msg_get_header_length()) {
-		/*
-		 * Complete reading of header
-		 */
-		to_read = msg_get_header_length() - *already_received_bytes;
-	} else {
-		/*
-		 * Read rest of message (or at least as much as possible)
-		 */
-		to_read = (msg_get_header_length() + msg_get_len(msg)) - *already_received_bytes;
-	}
-
-	if (to_read > QNETD_CLIENT_NET_LOCAL_NET_BUFFER) {
-		to_read = QNETD_CLIENT_NET_LOCAL_NET_BUFFER;
-	}
-
-	readed = PR_Recv(socket, local_read_buffer, to_read, 0, PR_INTERVAL_NO_TIMEOUT);
-	if (readed > 0) {
-		*already_received_bytes += readed;
-
-		if (!*skipping_msg) {
-			if (dynar_cat(msg, local_read_buffer, readed) == -1) {
-				*skipping_msg = 1;
-				ret = -4;
-			}
-		}
-
-		if (*skipping_msg && *already_received_bytes < msg_get_header_length()) {
-			/*
-			 * Fatal error. We were unable to store even message header
-			 */
-			return (-3);
-		}
-
-		if (!*skipping_msg && *already_received_bytes == msg_get_header_length()) {
-			/*
-			 * Full header received. Check type, maximum size, ...
-			 */
-			if (!msg_is_valid_msg_type(msg)) {
-				*skipping_msg = 1;
-				ret = -5;
-			} else if (msg_get_header_length() + msg_get_len(msg) > dynar_max_size(msg)) {
-				*skipping_msg = 1;
-				ret = -6;
-			}
-		}
-
-		if (*already_received_bytes >= msg_get_header_length() &&
-		    *already_received_bytes == (msg_get_header_length() + msg_get_len(msg))) {
-			/*
-			 * Full message skipped or received
-			 */
-			ret = 1;
-		}
-
-	}
-
-	if (readed == 0) {
-		return (-1);
-	}
-
-	if (readed < 0 && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
-		return (-2);
-	}
-
-	return (ret);
-}
 
 /*
  * -1 means end of connection (EOF) or some other unhandled error. 0 = success
@@ -255,30 +168,27 @@ int
 qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *client)
 {
 	int res;
-	int skipping_msg;
 
-	skipping_msg = (client->conn_state == QNETD_CLIENT_CONN_STATE_SKIPPING_MSG);
+	res = msgio_read(client->socket, &client->receive_buffer, &client->msg_already_received_bytes,
+	    &client->skipping_msg);
 
-	res = msgio_read(client->socket, &client->receive_buffer, &client->msg_already_received_bytes, &skipping_msg);
-
-	if (skipping_msg) {
+	if (client->skipping_msg) {
 		fprintf(stderr, "SKIPPING MSG\n");
-
-		client->conn_state = QNETD_CLIENT_CONN_STATE_SKIPPING_MSG;
 	}
 
 	if (res == -1) {
+		qnetd_log_nss(LOG_DEBUG, "Client closed connection");
 		return (-1);
 	}
 
 	if (res == -2) {
-		qnetd_log_nss(LOG_ERR, "Unhandled error when reading from client");
+		qnetd_log_nss(LOG_ERR, "Unhandled error when reading from client. Disconnecting client");
 
 		return (-1);
 	}
 
 	if (res == -3) {
-		qnetd_log(LOG_ERR, "Can't store message header from client. Terminating client");
+		qnetd_log(LOG_ERR, "Can't store message header from client. Disconnecting client");
 
 		return (-1);
 	}
@@ -300,14 +210,16 @@ qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *clie
 
 	if (res == 1) {
 		/*
-		 * Full message received
+		 * Full message received / skipped
 		 */
-		if (!skipping_msg) {
+		if (!client->skipping_msg) {
 			fprintf(stderr, "FULL MESSAGE RECEIVED\n");
 			qnetd_client_msg_received(instance, client);
 		} else {
 			fprintf(stderr, "FULL MESSAGE SKIPPED\n");
 		}
+
+		client->skipping_msg = 0;
 	}
 
 	return (0);
@@ -341,7 +253,7 @@ qnetd_client_accept(struct qnetd_instance *instance)
 }
 
 void
-qnetd_client_terminate(struct qnetd_instance *instance, struct qnetd_client *client)
+qnetd_client_disconnect(struct qnetd_instance *instance, struct qnetd_client *client)
 {
 
 	PR_Close(client->socket);
@@ -356,10 +268,10 @@ qnetd_poll(struct qnetd_instance *instance)
 	PRPollDesc *pfds;
 	PRInt32 poll_res;
 	int i;
-	int terminate_client;
+	int client_disconnect;
 
 	client = NULL;
-	terminate_client = 0;
+	client_disconnect = 0;
 
 	pfds = qnetd_poll_array_create_from_clients_list(&instance->poll_array,
 	    &instance->clients, instance->server.socket, PR_POLL_READ);
@@ -387,18 +299,19 @@ qnetd_poll(struct qnetd_instance *instance)
 				}
 			}
 
-			if (pfds[i].out_flags & PR_POLL_READ) {
+			client_disconnect = 0;
+
+			if (!client_disconnect && pfds[i].out_flags & PR_POLL_READ) {
 				if (i == 0) {
 					qnetd_client_accept(instance);
 				} else {
 					if (qnetd_client_net_read(instance, client) == -1) {
-						fprintf(stderr, "Client terminate 1\n");
-						terminate_client = 1;
+						client_disconnect = 1;
 					}
 				}
 			}
 
-			if (pfds[i].out_flags & PR_POLL_WRITE) {
+			if (!client_disconnect && pfds[i].out_flags & PR_POLL_WRITE) {
 				if (i == 0) {
 					/*
 					 * Poll write on listen socket -> fatal error
@@ -407,15 +320,14 @@ qnetd_poll(struct qnetd_instance *instance)
 
 					return (-1);
 				} else {
-					fprintf(stderr, "net write");
 					if (qnetd_client_net_write(instance, client) == -1) {
-						fprintf(stderr, "Client terminate 2 \n");
-						terminate_client = 1;
+						client_disconnect = 1;
 					}
 				}
 			}
 
-			if (pfds[i].out_flags & (PR_POLL_ERR|PR_POLL_NVAL|PR_POLL_HUP|PR_POLL_EXCEPT)) {
+			if (!client_disconnect &&
+			    pfds[i].out_flags & (PR_POLL_ERR|PR_POLL_NVAL|PR_POLL_HUP|PR_POLL_EXCEPT)) {
 				if (i == 0) {
 					/*
 					 * Poll ERR on listening socket is fatal error
@@ -425,17 +337,18 @@ qnetd_poll(struct qnetd_instance *instance)
 					return (-1);
 
 				} else {
-					fprintf(stderr, "Client terminate 3\n");
+					qnetd_log(LOG_DEBUG, "POLL_ERR (%u) on client socket. Disconnecting.",
+					    pfds[i].out_flags);
 
-					terminate_client = 1;
+					client_disconnect = 1;
 				}
 			}
 
 			/*
-			 * If client is scheduled for termination, terminate it
+			 * If client is scheduled for disconnect, disconnect it
 			 */
-			if (terminate_client) {
-				qnetd_client_terminate(instance, client);
+			if (client_disconnect) {
+				qnetd_client_disconnect(instance, client);
 			}
 		}
 	}

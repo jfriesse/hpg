@@ -1,4 +1,5 @@
 #include "msgio.h"
+#include "msg.h"
 
 #define MSGIO_LOCAL_BUF_SIZE			(1 << 10)
 
@@ -87,4 +88,90 @@ msgio_write(PRFileDesc *socket, const struct dynar *msg, size_t *already_sent_by
 	}
 
 	return (0);
+}
+
+/*
+ * -1 End of connection
+ * -2 Unhandled error
+ * -3 Fatal error. Unable to store message header
+ * -4 Unable to store message
+ * -5 Invalid msg type
+ * -6 Msg too long
+ */
+int
+msgio_read(PRFileDesc *socket, struct dynar *msg, size_t *already_received_bytes, int *skipping_msg)
+{
+	char local_read_buffer[MSGIO_LOCAL_BUF_SIZE];
+	PRInt32 readed;
+	PRInt32 to_read;
+	int ret;
+
+	ret = 0;
+
+	if (*already_received_bytes < msg_get_header_length()) {
+		/*
+		 * Complete reading of header
+		 */
+		to_read = msg_get_header_length() - *already_received_bytes;
+	} else {
+		/*
+		 * Read rest of message (or at least as much as possible)
+		 */
+		to_read = (msg_get_header_length() + msg_get_len(msg)) - *already_received_bytes;
+	}
+
+	if (to_read > MSGIO_LOCAL_BUF_SIZE) {
+		to_read = MSGIO_LOCAL_BUF_SIZE;
+	}
+
+	readed = PR_Recv(socket, local_read_buffer, to_read, 0, PR_INTERVAL_NO_TIMEOUT);
+	if (readed > 0) {
+		*already_received_bytes += readed;
+
+		if (!*skipping_msg) {
+			if (dynar_cat(msg, local_read_buffer, readed) == -1) {
+				*skipping_msg = 1;
+				ret = -4;
+			}
+		}
+
+		if (*skipping_msg && *already_received_bytes < msg_get_header_length()) {
+			/*
+			 * Fatal error. We were unable to store even message header
+			 */
+			return (-3);
+		}
+
+		if (!*skipping_msg && *already_received_bytes == msg_get_header_length()) {
+			/*
+			 * Full header received. Check type, maximum size, ...
+			 */
+			if (!msg_is_valid_msg_type(msg)) {
+				*skipping_msg = 1;
+				ret = -5;
+			} else if (msg_get_header_length() + msg_get_len(msg) > dynar_max_size(msg)) {
+				*skipping_msg = 1;
+				ret = -6;
+			}
+		}
+
+		if (*already_received_bytes >= msg_get_header_length() &&
+		    *already_received_bytes == (msg_get_header_length() + msg_get_len(msg))) {
+			/*
+			 * Full message skipped or received
+			 */
+			ret = 1;
+		}
+
+	}
+
+	if (readed == 0) {
+		return (-1);
+	}
+
+	if (readed < 0 && PR_GetError() != PR_WOULD_BLOCK_ERROR) {
+		return (-2);
+	}
+
+	return (ret);
 }
