@@ -21,6 +21,7 @@
 #include "qnetd-poll-array.h"
 #include "qnetd-log.h"
 #include "dynar.h"
+#include "timer-list.h"
 
 #define QNETD_HOST      NULL
 #define QNETD_PORT      4433
