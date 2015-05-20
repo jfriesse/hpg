@@ -11,6 +11,7 @@
 #include <err.h>
 #include <keyhi.h>
 #include <syslog.h>
+#include <signal.h>
 
 #include "msg.h"
 #include "msgio.h"
@@ -47,12 +48,20 @@ struct qnetd_instance {
 	enum tlv_tls_supported tls_supported;
 };
 
+/*
+ * This is global variable used for comunication with main loop and signal (calls close)
+ */
+PRFileDesc *global_server_socket;
 
 
 static void qnetd_err_nss(void) {
 	qnetd_log_nss(LOG_CRIT, "NSS error");
 
 	exit(1);
+}
+
+static void qnetd_warn_nss(void) {
+	qnetd_log_nss(LOG_WARNING, "NSS warning");
 }
 
 void
@@ -178,7 +187,7 @@ qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *clie
 	}
 
 	if (res == -1) {
-		qnetd_log_nss(LOG_DEBUG, "Client closed connection");
+		qnetd_log(LOG_DEBUG, "Client closed connection");
 		return (-1);
 	}
 
@@ -330,10 +339,15 @@ qnetd_poll(struct qnetd_instance *instance)
 			if (!client_disconnect &&
 			    pfds[i].out_flags & (PR_POLL_ERR|PR_POLL_NVAL|PR_POLL_HUP|PR_POLL_EXCEPT)) {
 				if (i == 0) {
-					/*
-					 * Poll ERR on listening socket is fatal error
-					 */
-					qnetd_log(LOG_CRIT, "POLL_ERR (%u) on listening socket", pfds[i].out_flags);
+					if (pfds[i].out_flags != PR_POLL_NVAL) {
+						/*
+						 * Poll ERR on listening socket is fatal error. POLL_NVAL is
+						 * used as a signal to quit poll loop.
+						 */
+						qnetd_log(LOG_CRIT, "POLL_ERR (%u) on listening socket", pfds[i].out_flags);
+					} else {
+						qnetd_log(LOG_DEBUG, "Listening socket is closed");
+					}
 
 					return (-1);
 
@@ -390,12 +404,46 @@ qnetd_instance_init(struct qnetd_instance *instance, size_t max_client_receive_s
 	return (0);
 }
 
+int
+qnetd_instance_destroy(struct qnetd_instance *instance)
+{
+
+	qnetd_poll_array_destroy(&instance->poll_array);
+	qnetd_clients_list_free(&instance->clients);
+
+	return (0);
+}
+
+static void
+signal_int_handler(int sig)
+{
+
+	qnetd_log(LOG_DEBUG, "SIGINT received - closing server socket");
+
+	PR_Close(global_server_socket);
+}
+
+void
+signal_handlers_register(void)
+{
+	struct sigaction act;
+
+	act.sa_handler = signal_int_handler;
+	sigemptyset(&act.sa_mask);
+	act.sa_flags = SA_RESTART;
+
+	sigaction(SIGINT, &act, NULL);
+}
 
 int main(void)
 {
 	struct qnetd_instance instance;
 
+	/*
+	 * INIT
+	 */
 	qnetd_log_init(QNETD_LOG_TARGET_STDERR);
+	qnetd_log_set_debug(1);
 
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		qnetd_err_nss();
@@ -426,12 +474,18 @@ int main(void)
 		qnetd_err_nss();
 	}
 
-	while (1) {
-		qnetd_poll(&instance);
-		fprintf(stderr,"POLL\n");
+	global_server_socket = instance.server.socket;
+	signal_handlers_register();
+
+	/*
+	 * MAIN LOOP
+	 */
+	while (qnetd_poll(&instance) == 0) {
 	}
 
-	PR_Close(instance.server.socket);
+	/*
+	 * Cleanup
+	 */
 	CERT_DestroyCertificate(instance.server.cert);
 	SECKEY_DestroyPrivateKey(instance.server.private_key);
 
@@ -439,11 +493,15 @@ int main(void)
 
 	SSL_ShutdownServerSessionIDCache();
 
+	qnetd_instance_destroy(&instance);
+
 	if (NSS_Shutdown() != SECSuccess) {
-		qnetd_err_nss();
+		qnetd_warn_nss();
 	}
 
-	PR_Cleanup();
+	if (PR_Cleanup() != SECSuccess) {
+		qnetd_warn_nss();
+	}
 
 	qnetd_log_close();
 
