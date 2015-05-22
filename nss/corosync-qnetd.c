@@ -54,13 +54,15 @@ struct qnetd_instance {
 PRFileDesc *global_server_socket;
 
 
-static void qnetd_err_nss(void) {
+static void
+qnetd_err_nss(void) {
 	qnetd_log_nss(LOG_CRIT, "NSS error");
 
 	exit(1);
 }
 
-static void qnetd_warn_nss(void) {
+static void
+qnetd_warn_nss(void) {
 	qnetd_log_nss(LOG_WARNING, "NSS warning");
 }
 
@@ -435,7 +437,8 @@ signal_handlers_register(void)
 	sigaction(SIGINT, &act, NULL);
 }
 
-int main(void)
+int
+main(void)
 {
 	struct qnetd_instance instance;
 
