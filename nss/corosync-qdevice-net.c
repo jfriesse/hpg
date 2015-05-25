@@ -299,15 +299,18 @@ qdevice_net_socket_read(struct qdevice_net_instance *instance)
 {
 	int res;
 	int ret_val;
+	int orig_skipping_msg;
 
-	ret_val = 0;
+	orig_skipping_msg = instance->skipping_msg;
 
 	res = msgio_read(instance->socket, &instance->receive_buffer, &instance->msg_already_received_bytes,
 	    &instance->skipping_msg);
 
-	if (instance->skipping_msg) {
+	if (!orig_skipping_msg && instance->skipping_msg) {
 		qdevice_net_log(LOG_DEBUG, "msgio_read set skipping_msg");
 	}
+
+	ret_val = 0;
 
 	switch (res) {
 	case 0:

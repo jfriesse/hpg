@@ -107,12 +107,61 @@ qnetd_client_net_schedule_send(struct qnetd_client *client)
 	return (0);
 }
 
-void
+int
+qnetd_client_msg_received_preinit(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg)
+{
+	if (msg_create_preinit_reply(&client->send_buffer, msg->seq_number_set, msg->seq_number,
+	    instance->tls_supported, instance->tls_client_cert_required) == 0) {
+		qnetd_log(LOG_ERR, "Can't alloc preinit reply msg. Disconnecting client connection.");
+
+		return (-1);
+	};
+
+	if (qnetd_client_net_schedule_send(client) != 0) {
+		qnetd_log(LOG_ERR, "Can't schedule send of message. Disconnecting client connection.");
+
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+qnetd_client_msg_received_preinit_reply(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg)
+{
+
+	qnetd_log(LOG_ERR, "Received preinit reply. Sending back error message");
+	// TODO
+
+	return (0);
+}
+
+int
+qnetd_client_msg_received_starttls(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg)
+{
+	PRFileDesc *new_pr_fd;
+
+	if ((new_pr_fd = nss_sock_start_ssl_as_server(client->socket, instance->server.cert,
+	    instance->server.private_key, instance->tls_client_cert_required, 0, NULL)) == NULL) {
+		qnetd_log_nss(LOG_ERR, "Can't start TLS. Disconnecting client.");
+
+		return (-1);
+	}
+
+	client->socket = new_pr_fd;
+
+	return (0);
+}
+
+int
 qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *client)
 {
 	struct msg_decoded msg;
 	int res;
-	PRFileDesc *new_pr_fd;
+	int ret_val;
 
 	msg_decoded_init(&msg);
 
@@ -123,44 +172,46 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 		 */
 		qnetd_client_log_msg_decode_error(res);
 		qnetd_log(LOG_INFO, "Sending back error message");
+
 		// TODO
+
+		return (-1);
 	}
+
+	ret_val = 0;
 
 	switch (msg.type) {
 	case MSG_TYPE_PREINIT:
-		if (msg_create_preinit_reply(&client->send_buffer, msg.seq_number_set, msg.seq_number,
-		    instance->tls_supported, instance->tls_client_cert_required) == 0) {
-			qnetd_log(LOG_ERR, "Can't alloc preinit reply msg. Disconnecting client connection.");
-
-			// TODO
-		};
-
-		if (qnetd_client_net_schedule_send(client) != 0) {
-			qnetd_log(LOG_ERR, "Can't schedule send of message");
-		}
-
+		ret_val = qnetd_client_msg_received_preinit(instance, client, &msg);
 		break;
 	case MSG_TYPE_PREINIT_REPLY:
-		fprintf(stderr, "PREINIT reply\n");
+		ret_val = qnetd_client_msg_received_preinit_reply(instance, client, &msg);
 		break;
 	case MSG_TYPE_STARTTLS:
-		if ((new_pr_fd = nss_sock_start_ssl_as_server(client->socket, instance->server.cert,
-		    instance->server.private_key, instance->tls_client_cert_required, 0, NULL)) == NULL) {
-			qnetd_log_nss(LOG_ERR, "Can't start TLS");
-
-		}
-
-		client->socket = new_pr_fd;
-
+		ret_val = qnetd_client_msg_received_starttls(instance, client, &msg);
 		break;
 	default:
-		fprintf(stderr, "Unsupported message received\n");
+		qnetd_log(LOG_ERR, "Unsupported message %u received from client. Sending back error message",
+		    msg.type);
+		// TODO
 		break;
 	}
 
 	msg_decoded_destroy(&msg);
+
+	return (ret_val);
 }
 
+int
+qnetd_client_net_write_finished(struct qnetd_instance *instance, struct qnetd_client *client)
+{
+
+	/*
+	 * Callback is currently unused
+	 */
+
+	return (0);
+}
 
 int
 qnetd_client_net_write(struct qnetd_instance *instance, struct qnetd_client *client)
@@ -172,6 +223,9 @@ qnetd_client_net_write(struct qnetd_instance *instance, struct qnetd_client *cli
 	if (res == 1) {
 		client->sending_msg = 0;
 
+		if (qnetd_client_net_write_finished(instance, client) == -1) {
+			return (-1);
+		}
 	}
 
 	if (res == -1) {
@@ -197,63 +251,73 @@ int
 qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *client)
 {
 	int res;
+	int ret_val;
+	int orig_skipping_msg;
+
+	orig_skipping_msg = client->skipping_msg;
 
 	res = msgio_read(client->socket, &client->receive_buffer, &client->msg_already_received_bytes,
 	    &client->skipping_msg);
 
-	if (client->skipping_msg) {
-		fprintf(stderr, "SKIPPING MSG\n");
+	if (!orig_skipping_msg && client->skipping_msg) {
+		qnetd_log(LOG_DEBUG, "msgio_read set skipping_msg");
 	}
 
-	if (res == -1) {
+	ret_val = 0;
+
+	switch (res) {
+	case 0:
+		/*
+		 * Partial read
+		 */
+		break;
+	case -1:
 		qnetd_log(LOG_DEBUG, "Client closed connection");
-		return (-1);
-	}
-
-	if (res == -2) {
+		ret_val = -1;
+		break;
+	case -2:
 		qnetd_log_nss(LOG_ERR, "Unhandled error when reading from client. Disconnecting client");
-
-		return (-1);
-	}
-
-	if (res == -3) {
+		ret_val = -1;
+		break;
+	case -3:
 		qnetd_log(LOG_ERR, "Can't store message header from client. Disconnecting client");
-
-		return (-1);
-	}
-
-	if (res == -4) {
+		ret_val = -1;
+		break;
+	case -4:
 		qnetd_log(LOG_ERR, "Can't store message from client. Skipping message");
-	}
-
-	if (res == -5) {
+		break;
+	case -5:
 		qnetd_log(LOG_WARNING, "Client sent unsupported msg type %u. Skipping message",
 			    msg_get_type(&client->receive_buffer));
-	}
-
-	if (res == -6) {
+		break;
+	case -6:
 		qnetd_log(LOG_WARNING,
 		    "Client wants to send too long message %u bytes. Skipping message",
 		    msg_get_len(&client->receive_buffer));
-	}
-
-	if (res == 1) {
+		break;
+	case 1:
 		/*
 		 * Full message received / skipped
 		 */
 		if (!client->skipping_msg) {
-			fprintf(stderr, "FULL MESSAGE RECEIVED\n");
-			qnetd_client_msg_received(instance, client);
+			if (qnetd_client_msg_received(instance, client) == -1) {
+				ret_val = -1;
+			}
 		} else {
+			// TODO - Send error back to client
 			fprintf(stderr, "FULL MESSAGE SKIPPED\n");
 		}
 
 		client->skipping_msg = 0;
 		client->msg_already_received_bytes = 0;
 		dynar_clean(&client->receive_buffer);
+		break;
+	default:
+		errx(1, "Unhandled msgio_read error %d\n", res);
+		break;
 	}
 
-	return (0);
+	return (ret_val);
 }
 
 int
