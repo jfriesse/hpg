@@ -14,6 +14,7 @@ extern "C" {
 enum msg_type {
 	MSG_TYPE_PREINIT = 0,
 	MSG_TYPE_PREINIT_REPLY = 1,
+	MSG_TYPE_STARTTLS = 2,
 };
 
 struct msg_decoded {
@@ -39,6 +40,9 @@ extern size_t		msg_create_preinit(struct dynar *msg, const char *cluster_name,
 
 extern size_t		msg_create_preinit_reply(struct dynar *msg, int add_msg_seq_number,
     uint32_t msg_seq_number, enum tlv_tls_supported tls_supported, int tls_client_cert_required);
+
+extern size_t		msg_create_starttls(struct dynar *msg, int add_msg_seq_number,
+    uint32_t msg_seq_number);
 
 extern size_t		msg_get_header_length(void);
 

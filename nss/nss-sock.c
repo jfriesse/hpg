@@ -202,9 +202,13 @@ nss_sock_create_client_socket(const char *hostname, uint16_t port, PRIntn af, PR
  */
 PRFileDesc *
 nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBadCertHandler bad_cert_hook,
-    SSLGetClientAuthData client_auth_hook, void *client_auth_hook_arg)
+    SSLGetClientAuthData client_auth_hook, void *client_auth_hook_arg, int force_handshake, int *reset_would_block)
 {
 	PRFileDesc *ssl_sock;
+
+	if (force_handshake) {
+		*reset_would_block = 0;
+	}
 
 	ssl_sock = SSL_ImportFD(NULL, input_sock);
 	if (ssl_sock == NULL) {
@@ -233,8 +237,15 @@ nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBad
 		return (NULL);
 	}
 
-	if (SSL_ForceHandshake(ssl_sock) != SECSuccess) {
-		return (NULL);
+	if (force_handshake && SSL_ForceHandshake(ssl_sock) != SECSuccess) {
+		if (PR_GetError() == PR_WOULD_BLOCK_ERROR) {
+			/*
+			 * Mask would block error.
+			 */
+			*reset_would_block = 1;
+		} else {
+	                return (NULL);
+	        }
 	}
 
 	return (ssl_sock);
@@ -242,11 +253,13 @@ nss_sock_start_ssl_as_client(PRFileDesc *input_sock, const char *ssl_url, SSLBad
 
 PRFileDesc *
 nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cert, SECKEYPrivateKey *server_key,
-    int require_client_cert, int *reset_would_block)
+    int require_client_cert, int force_handshake, int *reset_would_block)
 {
 	PRFileDesc *ssl_sock;
 
-	*reset_would_block = 0;
+	if (force_handshake) {
+		*reset_would_block = 0;
+	}
 
 	ssl_sock = SSL_ImportFD(NULL, input_sock);
 	if (ssl_sock == NULL) {
@@ -269,7 +282,7 @@ nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cer
 		return (NULL);
 	}
 
-        if (SSL_ForceHandshake(ssl_sock) != SECSuccess) {
+        if (force_handshake && SSL_ForceHandshake(ssl_sock) != SECSuccess) {
 		if (PR_GetError() == PR_WOULD_BLOCK_ERROR) {
 			/*
 			 * Mask would block error.

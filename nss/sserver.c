@@ -109,7 +109,7 @@ recv_from_client(PRFileDesc **socket)
 #ifdef ENABLE_TLS
 	if (strcmp(buf, "starttls\n") == 0) {
 		*socket = nss_sock_start_ssl_as_server(*socket, server.cert, server.private_key,
-		    PR_TRUE, &reset_would_block);
+		    PR_TRUE, 1, &reset_would_block);
 		if (*socket == NULL) {
 			fprintf(stderr, "AAAA\n");
 			err_nss();
@@ -193,8 +193,9 @@ handle_client(PRFileDesc **socket)
 int main(void)
 {
 	PRFileDesc *client_socket;
+#ifndef ENABLE_TLS
 	CERTCertificate *peer_cert;
-
+#endif
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		err_nss();
 	}

@@ -148,7 +148,11 @@ handle_client(PRFileDesc *socket)
 
 #ifdef ENABLE_TLS
 				if (strcmp(to_send, "starttls\n") == 0) {
-					if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server", nss_bad_cert_hook, /*NSS_GetClientAuthData*/ get_client_auth_data, "Cluster Cert")) == NULL) {
+					int reset_would_block;
+
+					if ((client_socket = nss_sock_start_ssl_as_client(client_socket, "Qnetd Server",
+					    nss_bad_cert_hook, /*NSS_GetClientAuthData*/ get_client_auth_data,
+					    "Cluster Cert", 1, &reset_would_block)) == NULL) {
 						fprintf(stderr, "AAAAA\n");
 						err_nss();
 					}

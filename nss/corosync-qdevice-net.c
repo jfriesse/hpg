@@ -25,6 +25,9 @@
 #define QNETD_HOST	"localhost"
 #define QNETD_PORT	4433
 
+#define QNETD_NSS_SERVER_CN		"Qnetd Server"
+#define QDEVICE_NET_NSS_CLIENT_CERT_NICKNAME	"Cluster Cert"
+
 #define QDEVICE_NET_MAX_MSG_RECEIVE_SIZE	(1 << 15)
 #define QDEVICE_NET_MAX_MSG_SEND_SIZE		(1 << 15)
 
@@ -41,6 +44,8 @@
 
 enum qdevice_net_state {
 	QDEVICE_NET_STATE_WAITING_PREINIT_REPLY,
+	QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT,
+	QDEVICE_NET_STATE_WAITING_SERVER_INIT_REPLY,
 };
 
 struct qdevice_net_instance {
@@ -62,6 +67,47 @@ struct qdevice_net_instance {
 static void
 err_nss(void) {
 	errx(1, "nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
+}
+
+static SECStatus
+qdevice_net_nss_bad_cert_hook(void *arg, PRFileDesc *fd) {
+	if (PR_GetError() == SEC_ERROR_EXPIRED_CERTIFICATE ||
+	    PR_GetError() == SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE ||
+	    PR_GetError() == SEC_ERROR_CRL_EXPIRED ||
+	    PR_GetError() == SEC_ERROR_KRL_EXPIRED ||
+	    PR_GetError() == SSL_ERROR_EXPIRED_CERT_ALERT) {
+		qdevice_net_log(LOG_WARNING, "Server certificate is expired.");
+
+		return (SECSuccess);
+        }
+
+	qdevice_net_log_nss(LOG_ERR, "Server certificate verification failure.");
+
+	return (SECFailure);
+}
+
+static SECStatus
+qdevice_net_nss_get_client_auth_data(void *arg, PRFileDesc *socket, struct CERTDistNamesStr *caNames,
+    struct CERTCertificateStr **pRetCert, struct SECKEYPrivateKeyStr **pRetKey)
+{
+	fprintf(stderr, "SENDING AUTH DATA\n");
+	return (NSS_GetClientAuthData(arg, socket, caNames, pRetCert, pRetKey));
+}
+
+int
+qdevice_net_schedule_send(struct qdevice_net_instance *instance)
+{
+	if (instance->sending_msg) {
+		/*
+		 * Msg is already scheduled for send
+		 */
+		return (-1);
+	}
+
+	instance->msg_already_sent_bytes = 0;
+	instance->sending_msg = 1;
+
+	return (0);
 }
 
 void
@@ -196,7 +242,25 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 			/*
 			 * Start TLS
 			 */
+			instance->expected_msg_seq_num++;
+			if (msg_create_starttls(&instance->send_buffer, 1, instance->expected_msg_seq_num) == 0) {
+				qdevice_net_log(LOG_ERR, "Can't allocate send buffer for starttls msg");
+				ret_val = -1;
+				goto return_res;
+			}
+			if (qdevice_net_schedule_send(instance) != 0) {
+				qdevice_net_log(LOG_ERR, "Can't schedule send of starttls msg");
+				ret_val = -1;
+				goto return_res;
+			}
 
+			instance->state = QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT;
+			fprintf(stderr, "Send starttls\n");
+		} else if (res == 0) {
+			/*
+			 * Send init
+			 */
+			fprintf(stderr, "TODO\n");
 		}
 
 		break;
@@ -225,6 +289,7 @@ qdevice_net_socket_read(struct qdevice_net_instance *instance)
 	res = msgio_read(instance->socket, &instance->receive_buffer, &instance->msg_already_received_bytes,
 	    &instance->skipping_msg);
 
+	fprintf(stderr, "TU %d\n", res);
 	if (instance->skipping_msg) {
 		qdevice_net_log(LOG_DEBUG, "msgio_read set skipping_msg");
 	}
@@ -281,6 +346,8 @@ qdevice_net_socket_read(struct qdevice_net_instance *instance)
 		}
 
 		instance->skipping_msg = 0;
+		instance->msg_already_received_bytes = 0;
+		dynar_clean(&instance->receive_buffer);
 	}
 
 	return (0);
@@ -290,12 +357,29 @@ int
 qdevice_net_socket_write(struct qdevice_net_instance *instance)
 {
 	int res;
+	PRFileDesc *new_pr_fd;
 
 	res = msgio_write(instance->socket, &instance->send_buffer, &instance->msg_already_sent_bytes);
 
 	if (res == 1) {
 		instance->sending_msg = 0;
 
+		if (instance->state == QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT) {
+			/*
+			 * StartTLS sent to server. Begin with TLS handshake
+			 */
+			fprintf(stderr, "Start TLS\n");
+			if ((new_pr_fd = nss_sock_start_ssl_as_client(instance->socket, QNETD_NSS_SERVER_CN,
+			    qdevice_net_nss_bad_cert_hook,
+			    qdevice_net_nss_get_client_auth_data, QDEVICE_NET_NSS_CLIENT_CERT_NICKNAME,
+			    0, NULL)) == NULL) {
+				qdevice_net_log_nss(LOG_ERR, "Can't start TLS");
+
+				return (-1);
+			}
+
+			instance->socket = new_pr_fd;
+		}
 	}
 
 	if (res == -1) {
@@ -313,21 +397,6 @@ qdevice_net_socket_write(struct qdevice_net_instance *instance)
 	return (0);
 }
 
-int
-qdevice_net_schedule_send(struct qdevice_net_instance *instance)
-{
-	if (instance->sending_msg) {
-		/*
-		 * Msg is already scheduled for send
-		 */
-		return (-1);
-	}
-
-	instance->msg_already_sent_bytes = 0;
-	instance->sending_msg = 1;
-
-	return (0);
-}
 
 #define QDEVICE_NET_POLL_NO_FDS		1
 #define QDEVICE_NET_POLL_SOCKET		0
@@ -349,6 +418,7 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 	schedule_disconnect = 0;
 
 	if ((poll_res = PR_Poll(pfds, QDEVICE_NET_POLL_NO_FDS, PR_INTERVAL_NO_TIMEOUT)) > 0) {
+	fprintf(stderr, "poll_res = %u , in_flags = %u, out_flags = %u\n", poll_res, pfds[QDEVICE_NET_POLL_SOCKET].in_flags, pfds[QDEVICE_NET_POLL_SOCKET].out_flags);
 		for (i = 0; i < QDEVICE_NET_POLL_NO_FDS; i++) {
 			if (pfds[i].out_flags & PR_POLL_READ) {
 				switch (i) {

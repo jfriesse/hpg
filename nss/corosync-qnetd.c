@@ -114,6 +114,7 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 {
 	struct msg_decoded msg;
 	int res;
+	PRFileDesc *new_pr_fd;
 
 	msg_decoded_init(&msg);
 
@@ -124,6 +125,7 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 		 */
 		qnetd_client_log_msg_decode_error(res);
 		qnetd_log(LOG_INFO, "Sending back error message");
+		// TODO
 	}
 
 	switch (msg.type) {
@@ -142,6 +144,16 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 		break;
 	case MSG_TYPE_PREINIT_REPLY:
 		fprintf(stderr, "PREINIT reply\n");
+		break;
+	case MSG_TYPE_STARTTLS:
+		if ((new_pr_fd = nss_sock_start_ssl_as_server(client->socket, instance->server.cert,
+		    instance->server.private_key, instance->tls_client_cert_required, 0, NULL)) == NULL) {
+			qnetd_log_nss(LOG_ERR, "Can't start TLS");
+
+		}
+
+		client->socket = new_pr_fd;
+
 		break;
 	default:
 		fprintf(stderr, "Unsupported message received\n");
@@ -191,6 +203,7 @@ qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *clie
 	res = msgio_read(client->socket, &client->receive_buffer, &client->msg_already_received_bytes,
 	    &client->skipping_msg);
 
+fprintf(stderr,"TU %d\n", res);
 	if (client->skipping_msg) {
 		fprintf(stderr, "SKIPPING MSG\n");
 	}
@@ -239,6 +252,8 @@ qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *clie
 		}
 
 		client->skipping_msg = 0;
+		client->msg_already_received_bytes = 0;
+		dynar_clean(&client->receive_buffer);
 	}
 
 	return (0);

@@ -131,6 +131,29 @@ small_buf_err:
 	return (0);
 }
 
+size_t
+msg_create_starttls(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number)
+{
+
+	dynar_clean(msg);
+
+	msg_add_type(msg, MSG_TYPE_STARTTLS);
+	msg_add_len(msg);
+
+	if (add_msg_seq_number) {
+		if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
+
+	return (dynar_size(msg));
+
+small_buf_err:
+	return (0);
+}
+
 int
 msg_is_valid_msg_type(const struct dynar *msg)
 {
@@ -143,6 +166,7 @@ msg_is_valid_msg_type(const struct dynar *msg)
 	switch (type) {
 	case MSG_TYPE_PREINIT:
 	case MSG_TYPE_PREINIT_REPLY:
+	case MSG_TYPE_STARTTLS:
 		res = 1;
 		break;
 	default:
