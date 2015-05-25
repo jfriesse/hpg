@@ -14,9 +14,9 @@ prclist-test: prclist-test.c
 	$(CC) $(CFLAGS) `pkg-config --cflags nspr` `pkg-config --cflags nss` nss-sock.c prclist-test.c \
 	`pkg-config --libs nspr` `pkg-config --libs nss` -o prclist-test
 
-corosync-qdevice-net: corosync-qdevice-net.c nss-sock.c tlv.c msg.c msgio.c dynar.c
+corosync-qdevice-net: corosync-qdevice-net.c nss-sock.c tlv.c msg.c msgio.c dynar.c qnetd-log.c
 	$(CC) $(CFLAGS) `pkg-config --cflags nspr` `pkg-config --cflags nss` \
-	nss-sock.c tlv.c msg.c msgio.c dynar.c \
+	nss-sock.c tlv.c msg.c msgio.c dynar.c qnetd-log.c \
 	corosync-qdevice-net.c \
 	`pkg-config --libs nspr` `pkg-config --libs nss` -o corosync-qdevice-net
 

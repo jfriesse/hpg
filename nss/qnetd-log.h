@@ -1,6 +1,8 @@
 #ifndef _QNETD_LOG_H_
 #define _QNETD_LOG_H_
 
+#include <syslog.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

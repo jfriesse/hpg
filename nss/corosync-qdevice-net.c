@@ -18,6 +18,7 @@
 #include "tlv.h"
 #include "msg.h"
 #include "msgio.h"
+#include "qnetd-log.h"
 
 #define NSS_DB_DIR	"node/nssdb"
 
@@ -26,6 +27,15 @@
 
 #define QDEVICE_NET_MAX_MSG_RECEIVE_SIZE	(1 << 15)
 #define QDEVICE_NET_MAX_MSG_SEND_SIZE		(1 << 15)
+
+#define qdevice_net_log			qnetd_log
+#define qdevice_net_log_nss		qnetd_log_nss
+#define qdevice_net_log_init		qnetd_log_init
+#define qdevice_net_log_close		qnetd_log_close
+#define qdevice_net_log_set_debug	qnetd_log_set_debug
+
+#define QDEVICE_NET_LOG_TARGET_STDERR		QNETD_LOG_TARGET_STDERR
+#define QDEVICE_NET_LOG_TARGET_SYSLOG		QNETD_LOG_TARGET_SYSLOG
 
 struct qdevice_net_instance {
 	PRFileDesc *socket;
@@ -44,6 +54,103 @@ err_nss(void) {
 	errx(1, "nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
 }
 
+/*
+ * -1 means end of connection (EOF) or some other unhandled error. 0 = success
+ */
+int
+qdevice_net_socket_read(struct qdevice_net_instance *instance)
+{
+	int res;
+
+	res = msgio_read(instance->socket, &instance->receive_buffer, &instance->msg_already_received_bytes,
+	    &instance->skipping_msg);
+
+	if (instance->skipping_msg) {
+		qdevice_net_log(LOG_DEBUG, "msgio_read set skipping_msg");
+	}
+
+	if (res == -1) {
+		qdevice_net_log(LOG_DEBUG, "Server closed connection");
+		return (-1);
+	}
+
+	if (res == -2) {
+		qdevice_net_log_nss(LOG_ERR, "Unhandled error when reading from server. Disconnecting from server");
+
+		return (-1);
+	}
+
+	if (res == -3) {
+		qdevice_net_log(LOG_ERR, "Can't store message header from server. Disconnecting from server");
+
+		return (-1);
+	}
+
+	if (res == -4) {
+		qdevice_net_log(LOG_ERR, "Can't store message from server. Disconnecting from server");
+
+		return (-1);
+	}
+
+	if (res == -5) {
+		qdevice_net_log(LOG_WARNING, "Server sent unsupported msg type %u. Disconnecting from server",
+			    msg_get_type(&instance->receive_buffer));
+
+		return (-1);
+	}
+
+	if (res == -6) {
+		qdevice_net_log(LOG_WARNING,
+		    "Server wants to send too long message %u bytes. Disconnecting from server",
+		    msg_get_len(&instance->receive_buffer));
+
+		return (-1);
+	}
+
+	if (res == 1) {
+		/*
+		 * Full message received / skipped
+		 */
+		if (!instance->skipping_msg) {
+			fprintf(stderr, "FULL MESSAGE RECEIVED\n");
+//			qnetd_client_msg_received(instance, client);
+		} else {
+			errx(1, "net_socket_read in skipping msg state");
+		}
+
+		instance->skipping_msg = 0;
+	}
+
+	return (0);
+}
+
+int
+qdevice_net_socket_write(struct qdevice_net_instance *instance)
+{
+	int res;
+
+	res = msgio_write(instance->socket, &instance->send_buffer, &instance->msg_already_sent_bytes);
+
+	if (res == 1) {
+		instance->sending_msg = 0;
+
+	}
+
+	if (res == -1) {
+		qdevice_net_log_nss(LOG_CRIT, "PR_Send returned 0");
+
+		return (-1);
+	}
+
+	if (res == -2) {
+		qdevice_net_log_nss(LOG_ERR, "Unhandled error when sending message to server");
+
+		return (-1);
+	}
+
+	return (0);
+}
+
 int
 qdevice_net_schedule_send(struct qdevice_net_instance *instance)
 {
@@ -56,6 +163,79 @@ qdevice_net_schedule_send(struct qdevice_net_instance *instance)
 
 	instance->msg_already_sent_bytes = 0;
 	instance->sending_msg = 1;
+
+	return (0);
+}
+
+#define QDEVICE_NET_POLL_NO_FDS		1
+#define QDEVICE_NET_POLL_SOCKET		0
+
+int
+qdevice_net_poll(struct qdevice_net_instance *instance)
+{
+	PRPollDesc pfds[QDEVICE_NET_POLL_NO_FDS];
+	PRInt32 poll_res;
+	int i;
+	int schedule_disconnect;
+
+	pfds[QDEVICE_NET_POLL_SOCKET].fd = instance->socket;
+	pfds[QDEVICE_NET_POLL_SOCKET].in_flags = PR_POLL_READ;
+	if (instance->sending_msg) {
+		pfds[QDEVICE_NET_POLL_SOCKET].in_flags |= PR_POLL_WRITE;
+	}
+
+	schedule_disconnect = 0;
+
+	if ((poll_res = PR_Poll(pfds, QDEVICE_NET_POLL_NO_FDS, PR_INTERVAL_NO_TIMEOUT)) > 0) {
+		for (i = 0; i < QDEVICE_NET_POLL_NO_FDS; i++) {
+			if (pfds[i].out_flags & PR_POLL_READ) {
+				switch (i) {
+				case QDEVICE_NET_POLL_SOCKET:
+					if (qdevice_net_socket_read(instance) == -1) {
+						schedule_disconnect = 1;
+					}
+
+					break ;
+				default:
+					errx(1, "Unhandled read poll descriptor %u", i);
+					break ;
+				}
+			}
+
+			if (!schedule_disconnect && pfds[i].out_flags & PR_POLL_WRITE) {
+				switch (i) {
+				case QDEVICE_NET_POLL_SOCKET:
+					if (qdevice_net_socket_write(instance) == -1) {
+						schedule_disconnect = 1;
+					}
+
+					break;
+				default:
+					errx(1, "Unhandled write poll descriptor %u", i);
+					break;
+				}
+			}
+
+			if (!schedule_disconnect &&
+			    pfds[i].out_flags & (PR_POLL_ERR|PR_POLL_NVAL|PR_POLL_HUP|PR_POLL_EXCEPT)) {
+				switch (i) {
+				case QDEVICE_NET_POLL_SOCKET:
+					qdevice_net_log(LOG_CRIT, "POLL_ERR (%u) on main socket", pfds[i].out_flags);
+
+					return (-1);
+
+					break;
+				default:
+					errx(1, "Unhandled poll err on descriptor %u", i);
+					break;
+				}
+			}
+		}
+	}
+
+	if (schedule_disconnect) {
+		return (-1);
+	}
 
 	return (0);
 }
@@ -88,8 +268,12 @@ qdevice_net_instance_destroy(struct qdevice_net_instance *instance)
 int main(void)
 {
 	struct qdevice_net_instance instance;
-	size_t start_pos;
-	ssize_t sent_bytes;
+
+	/*
+	 * Init
+	 */
+	qdevice_net_log_init(QDEVICE_NET_LOG_TARGET_STDERR);
+        qdevice_net_log_set_debug(1);
 
 	if (nss_sock_init_nss(NSS_DB_DIR) != 0) {
 		err_nss();
@@ -112,7 +296,6 @@ int main(void)
 		err_nss();
 	}
 
-
 	/*
 	 * Create and schedule send of preinit message to qnetd
 	 */
@@ -123,13 +306,15 @@ int main(void)
 		errx(1, "Can't schedule send of preinit msg");
 	}
 
-	start_pos = 0;
-	sent_bytes = msgio_send_blocking(instance.socket, dynar_data(&instance.send_buffer),
-	    dynar_size(&instance.send_buffer));
-	if (sent_bytes == -1 || sent_bytes != dynar_size(&instance.send_buffer)) {
-		err_nss();
+	/*
+	 * Main loop
+	 */
+	while (qdevice_net_poll(&instance) == 0) {
 	}
 
+	/*
+	 * Cleanup
+	 */
 	if (PR_Close(instance.socket) != SECSuccess) {
 		err_nss();
 	}
@@ -143,6 +328,8 @@ int main(void)
 	}
 
 	PR_Cleanup();
+
+	qdevice_net_log_close();
 
 	return (0);
 }
