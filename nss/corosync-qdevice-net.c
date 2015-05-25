@@ -28,6 +28,8 @@
 #define QDEVICE_NET_MAX_MSG_RECEIVE_SIZE	(1 << 15)
 #define QDEVICE_NET_MAX_MSG_SEND_SIZE		(1 << 15)
 
+#define QDEVICE_NET_TLS_SUPPORTED	TLV_TLS_SUPPORTED
+
 #define qdevice_net_log			qnetd_log
 #define qdevice_net_log_nss		qnetd_log_nss
 #define qdevice_net_log_init		qnetd_log_init
@@ -53,6 +55,8 @@ struct qdevice_net_instance {
 	size_t msg_already_sent_bytes;
 	enum qdevice_net_state state;
 	uint32_t expected_msg_seq_num;
+	enum tlv_tls_supported tls_supported;
+	int using_tls;
 };
 
 static void
@@ -74,20 +78,61 @@ qdevice_net_log_msg_decode_error(int ret)
 	case -3:
 		qdevice_net_log(LOG_WARNING, "Received inconsistent msg (tlv len > msg size)");
 		break;
+	case -4:
+		qdevice_net_log(LOG_ERR, "Received message with option with invalid value");
+		break;
 	default:
 		qdevice_net_log(LOG_ERR, "Unknown error occured when decoding message");
 		break;
 	}
 }
 
+/*
+ * -1 - Incompatible tls combination
+ *  0 - Don't use TLS
+ *  1 - Use TLS
+ */
+int
+qdevice_net_check_tls_compatibility(enum tlv_tls_supported server_tls, enum tlv_tls_supported client_tls)
+{
+	int res;
+
+	res = -1;
+
+	switch (server_tls) {
+	case TLV_TLS_UNSUPPORTED:
+		switch (client_tls) {
+		case TLV_TLS_UNSUPPORTED: res = 0; break ;
+		case TLV_TLS_SUPPORTED: res = 0; break ;
+		case TLV_TLS_REQUIRED: res = -1; break ;
+		}
+		break ;
+	case TLV_TLS_SUPPORTED:
+		switch (client_tls) {
+		case TLV_TLS_UNSUPPORTED: res = 0; break ;
+		case TLV_TLS_SUPPORTED: res = 1; break ;
+		case TLV_TLS_REQUIRED: res = 1; break ;
+		}
+		break ;
+	case TLV_TLS_REQUIRED:
+		switch (client_tls) {
+		case TLV_TLS_UNSUPPORTED: res = -1; break ;
+		case TLV_TLS_SUPPORTED: res = 1; break ;
+		case TLV_TLS_REQUIRED: res = 1; break ;
+		}
+		break ;
+	}
+
+	return (res);
+}
+
+
 int
 qdevice_net_msg_received(struct qdevice_net_instance *instance)
 {
 	struct msg_decoded msg;
 	int res;
-	int ret;
-
-	ret = 0;
+	int ret_val;
 
 	msg_decoded_init(&msg);
 
@@ -102,19 +147,19 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 		return (-1);
 	}
 
-	ret = 0;
+	ret_val = 0;
 
 	if (!msg.seq_number_set || msg.seq_number != instance->expected_msg_seq_num) {
-		qdevice_net_log(LOG_ERR, "Received message doesn't contain seq_number or it's not expected one");
+		qdevice_net_log(LOG_ERR, "Received message doesn't contain seq_number or it's not expected one.");
 
-		ret = -1;
+		ret_val = -1;
 		goto return_res;
 	}
 
 	switch (msg.type) {
 	case MSG_TYPE_PREINIT:
 		qdevice_net_log(LOG_ERR, "Received unexpected preinit message. Disconnecting from server");
-		ret = -1;
+		ret_val = -1;
 
 		goto return_res;
 
@@ -123,21 +168,41 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 		if (instance->state != QDEVICE_NET_STATE_WAITING_PREINIT_REPLY) {
 			qdevice_net_log(LOG_ERR, "Received unexpected preinit reply message. Disconnecting from server");
 
-			ret = -1;
+			ret_val = -1;
 
 			goto return_res;
 		}
 
-
 		/*
 		 * Check TLS support
 		 */
-		fprintf(stderr, "%u %u %u %u\n", msg.tls_supported_set, msg.tls_supported, msg.tls_client_cert_required_set, msg.tls_client_cert_required);
+		if (!msg.tls_supported_set || !msg.tls_client_cert_required_set) {
+			qdevice_net_log(LOG_ERR, "Required tls_supported or tls_client_cert_required option is unset");
+
+			ret_val = -1;
+
+			goto return_res;
+		}
+
+		res = qdevice_net_check_tls_compatibility(msg.tls_supported, instance->tls_supported);
+		if (res == -1) {
+			qdevice_net_log(LOG_ERR, "Incompatible tls configuration (server %u client %u)",
+			    msg.tls_supported, instance->tls_supported);
+
+			ret_val = -1;
+
+			goto return_res;
+		} else if (res == 1) {
+			/*
+			 * Start TLS
+			 */
+
+		}
 
 		break;
 	default:
 		qdevice_net_log(LOG_ERR, "Received unsupported message %u. Disconnecting from server", msg.type);
-		ret = -1;
+		ret_val = -1;
 		goto return_res;
 
 		break;
@@ -146,7 +211,7 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 return_res:
 	msg_decoded_destroy(&msg);
 
-	return (0);
+	return (ret_val);
 }
 
 /*
@@ -339,7 +404,7 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 
 int
 qdevice_net_instance_init(struct qdevice_net_instance *instance, size_t max_receive_size,
-    size_t max_send_size)
+    size_t max_send_size, enum tlv_tls_supported tls_supported)
 {
 
 	memset(instance, 0, sizeof(*instance));
@@ -348,6 +413,8 @@ qdevice_net_instance_init(struct qdevice_net_instance *instance, size_t max_rece
 	instance->max_send_size = max_send_size;
 	dynar_init(&instance->receive_buffer, max_receive_size);
 	dynar_init(&instance->send_buffer, max_send_size);
+
+	instance->tls_supported = tls_supported;
 
 	return (0);
 }
@@ -377,7 +444,7 @@ int main(void)
 	}
 
 	if (qdevice_net_instance_init(&instance, QDEVICE_NET_MAX_MSG_RECEIVE_SIZE,
-	    QDEVICE_NET_MAX_MSG_SEND_SIZE) == -1) {
+	    QDEVICE_NET_MAX_MSG_SEND_SIZE, TLV_TLS_REQUIRED) == -1) {
 		errx(1, "Can't initialize qdevice-net");
 	}
 

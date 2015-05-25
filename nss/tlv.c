@@ -175,6 +175,24 @@ tlv_iter_decode_u32(struct tlv_iterator *tlv_iter, uint32_t *res)
 }
 
 int
+tlv_iter_decode_u8(struct tlv_iterator *tlv_iter, uint8_t *res)
+{
+	const char *opt_data;
+	uint16_t opt_len;
+
+	opt_len = tlv_iter_get_len(tlv_iter);
+	opt_data = tlv_iter_get_data(tlv_iter);
+
+	if (opt_len != sizeof(*res)) {
+		return (-1);
+	}
+
+	memcpy(res, opt_data, sizeof(*res));
+
+	return (0);
+}
+
+int
 tlv_iter_decode_str(struct tlv_iterator *tlv_iter, char **str, size_t *str_len)
 {
 	const char *opt_data;

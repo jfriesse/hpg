@@ -176,6 +176,7 @@ msg_decoded_destroy(struct msg_decoded *decoded_msg)
  * -1 - option with invalid length
  * -2 - Unable to allocate memory
  * -3 - Inconsistent msg (tlv len > msg size)
+ * -4 - invalid option content
  */
 int
 msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
@@ -206,6 +207,26 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 			    &decoded_msg->cluster_name_len) != 0) {
 				return (-2);
 			}
+			break;
+		case TLV_OPT_TLS_SUPPORTED:
+			if (tlv_iter_decode_u8(&tlv_iter, (uint8_t *)&decoded_msg->tls_supported) != 0) {
+				return (-1);
+			}
+
+			if (decoded_msg->tls_supported != TLV_TLS_UNSUPPORTED &&
+			    decoded_msg->tls_supported != TLV_TLS_SUPPORTED &&
+			    decoded_msg->tls_supported != TLV_TLS_REQUIRED) {
+				return (-4);
+			}
+
+			decoded_msg->tls_supported_set = 1;
+			break;
+		case TLV_OPT_TLS_CLIENT_CERT_REQUIRED:
+			if (tlv_iter_decode_u8(&tlv_iter, (uint8_t *)&decoded_msg->tls_client_cert_required) != 0) {
+				return (-1);
+			}
+
+			decoded_msg->tls_client_cert_required_set = 1;
 			break;
 		default:
 			/*

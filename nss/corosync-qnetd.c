@@ -84,6 +84,9 @@ qnetd_client_log_msg_decode_error(int ret)
 	case -3:
 		qnetd_log(LOG_WARNING, "Received inconsistent msg (tlv len > msg size)");
 		break;
+	case -4:
+		qnetd_log(LOG_WARNING, "Received message with option with invalid value");
+		break;
 	default:
 		qnetd_log(LOG_ERR, "Unknown error occured when decoding message");
 		break;

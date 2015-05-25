@@ -55,6 +55,8 @@ extern const char		*tlv_iter_get_data(const struct tlv_iterator *tlv_iter);
 
 extern int			 tlv_iter_next(struct tlv_iterator *tlv_iter);
 
+extern int			 tlv_iter_decode_u8(struct tlv_iterator *tlv_iter, uint8_t *res);
+
 extern int			 tlv_iter_decode_u32(struct tlv_iterator *tlv_iter, uint32_t *res);
 
 extern int			 tlv_iter_decode_str(struct tlv_iterator *tlv_iter, char **str, size_t *str_len);
