@@ -35,6 +35,9 @@
 
 #define QNETD_CLIENT_NET_LOCAL_NET_BUFFER	(16)
 
+#define QNETD_TLS_SUPPORTED			TLV_TLS_SUPPORTED
+#define QNETD_TLS_CLIENT_CERT_REQUIRED		1
+
 struct qnetd_instance {
 	struct {
 		PRFileDesc *socket;
@@ -46,6 +49,7 @@ struct qnetd_instance {
 	struct qnetd_clients_list clients;
 	struct qnetd_poll_array poll_array;
 	enum tlv_tls_supported tls_supported;
+	int tls_client_cert_required;
 };
 
 /*
@@ -122,7 +126,7 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 	switch (msg.type) {
 	case MSG_TYPE_PREINIT:
 		if (msg_create_preinit_reply(&client->send_buffer, msg.seq_number_set, msg.seq_number,
-		    instance->tls_supported) == 0) {
+		    instance->tls_supported, instance->tls_client_cert_required) == 0) {
 			qnetd_log(LOG_ERR, "Can't alloc preinit reply msg. Disconnecting client connection.");
 
 			// TODO
@@ -392,7 +396,7 @@ qnetd_instance_init_certs(struct qnetd_instance *instance)
 
 int
 qnetd_instance_init(struct qnetd_instance *instance, size_t max_client_receive_size,
-    size_t max_client_send_size)
+    size_t max_client_send_size, enum tlv_tls_supported tls_supported, int tls_client_cert_required)
 {
 
 	memset(instance, 0, sizeof(*instance));
@@ -402,6 +406,9 @@ qnetd_instance_init(struct qnetd_instance *instance, size_t max_client_receive_s
 
 	instance->max_client_receive_size = max_client_receive_size;
 	instance->max_client_send_size = max_client_send_size;
+
+	instance->tls_supported = tls_supported;
+	instance->tls_client_cert_required = tls_client_cert_required;
 
 	return (0);
 }
@@ -456,7 +463,8 @@ main(void)
 		qnetd_err_nss();
 	}
 
-	if (qnetd_instance_init(&instance, QNETD_MAX_CLIENT_RECEIVE_SIZE, QNETD_MAX_CLIENT_SEND_SIZE) == -1) {
+	if (qnetd_instance_init(&instance, QNETD_MAX_CLIENT_RECEIVE_SIZE, QNETD_MAX_CLIENT_SEND_SIZE,
+	    QNETD_TLS_SUPPORTED, QNETD_TLS_CLIENT_CERT_REQUIRED) == -1) {
 		errx(1, "Can't initialize qnetd");
 	}
 

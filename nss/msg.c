@@ -101,7 +101,7 @@ small_buf_err:
 
 size_t
 msg_create_preinit_reply(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
-    enum tlv_tls_supported tls_supported)
+    enum tlv_tls_supported tls_supported, int tls_client_cert_required)
 {
 
 	dynar_clean(msg);
@@ -116,6 +116,10 @@ msg_create_preinit_reply(struct dynar *msg, int add_msg_seq_number, uint32_t msg
 	}
 
 	if (tlv_add_tls_supported(msg, tls_supported) == -1) {
+		goto small_buf_err;
+	}
+
+	if (tlv_add_tls_client_cert_required(msg, tls_client_cert_required) == -1) {
 		goto small_buf_err;
 	}
 

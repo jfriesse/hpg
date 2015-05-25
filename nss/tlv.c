@@ -75,6 +75,13 @@ tlv_add_tls_supported(struct dynar *msg, enum tlv_tls_supported tls_supported)
 	return (tlv_add_u8(msg, TLV_OPT_TLS_SUPPORTED, tls_supported));
 }
 
+int
+tlv_add_tls_client_cert_required(struct dynar *msg, int tls_client_cert_required)
+{
+
+	return (tlv_add_u8(msg, TLV_OPT_TLS_CLIENT_CERT_REQUIRED, tls_client_cert_required));
+}
+
 void
 tlv_iter_init(const struct dynar *msg, size_t msg_header_len, struct tlv_iterator *tlv_iter)
 {

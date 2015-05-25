@@ -37,6 +37,10 @@
 #define QDEVICE_NET_LOG_TARGET_STDERR		QNETD_LOG_TARGET_STDERR
 #define QDEVICE_NET_LOG_TARGET_SYSLOG		QNETD_LOG_TARGET_SYSLOG
 
+enum qdevice_net_state {
+	QDEVICE_NET_STATE_WAITING_PREINIT_REPLY,
+};
+
 struct qdevice_net_instance {
 	PRFileDesc *socket;
 	size_t max_send_size;
@@ -47,11 +51,102 @@ struct qdevice_net_instance {
 	int skipping_msg;
 	size_t msg_already_received_bytes;
 	size_t msg_already_sent_bytes;
+	enum qdevice_net_state state;
+	uint32_t expected_msg_seq_num;
 };
 
 static void
 err_nss(void) {
 	errx(1, "nss error %d: %s", PR_GetError(), PR_ErrorToString(PR_GetError(), PR_LANGUAGE_I_DEFAULT));
+}
+
+void
+qdevice_net_log_msg_decode_error(int ret)
+{
+
+	switch (ret) {
+	case -1:
+		qdevice_net_log(LOG_WARNING, "Received message with option with invalid length");
+		break;
+	case -2:
+		qdevice_net_log(LOG_CRIT, "Can't allocate memory");
+		break;
+	case -3:
+		qdevice_net_log(LOG_WARNING, "Received inconsistent msg (tlv len > msg size)");
+		break;
+	default:
+		qdevice_net_log(LOG_ERR, "Unknown error occured when decoding message");
+		break;
+	}
+}
+
+int
+qdevice_net_msg_received(struct qdevice_net_instance *instance)
+{
+	struct msg_decoded msg;
+	int res;
+	int ret;
+
+	ret = 0;
+
+	msg_decoded_init(&msg);
+
+	res = msg_decode(&instance->receive_buffer, &msg);
+	if (res != 0) {
+		/*
+		 * Error occurred. Disconnect.
+		 */
+		qdevice_net_log_msg_decode_error(res);
+		qdevice_net_log(LOG_ERR, "Disconnecting from server");
+
+		return (-1);
+	}
+
+	ret = 0;
+
+	if (!msg.seq_number_set || msg.seq_number != instance->expected_msg_seq_num) {
+		qdevice_net_log(LOG_ERR, "Received message doesn't contain seq_number or it's not expected one");
+
+		ret = -1;
+		goto return_res;
+	}
+
+	switch (msg.type) {
+	case MSG_TYPE_PREINIT:
+		qdevice_net_log(LOG_ERR, "Received unexpected preinit message. Disconnecting from server");
+		ret = -1;
+
+		goto return_res;
+
+		break;
+	case MSG_TYPE_PREINIT_REPLY:
+		if (instance->state != QDEVICE_NET_STATE_WAITING_PREINIT_REPLY) {
+			qdevice_net_log(LOG_ERR, "Received unexpected preinit reply message. Disconnecting from server");
+
+			ret = -1;
+
+			goto return_res;
+		}
+
+
+		/*
+		 * Check TLS support
+		 */
+		fprintf(stderr, "%u %u %u %u\n", msg.tls_supported_set, msg.tls_supported, msg.tls_client_cert_required_set, msg.tls_client_cert_required);
+
+		break;
+	default:
+		qdevice_net_log(LOG_ERR, "Received unsupported message %u. Disconnecting from server", msg.type);
+		ret = -1;
+		goto return_res;
+
+		break;
+	}
+
+return_res:
+	msg_decoded_destroy(&msg);
+
+	return (0);
 }
 
 /*
@@ -113,7 +208,9 @@ qdevice_net_socket_read(struct qdevice_net_instance *instance)
 		 */
 		if (!instance->skipping_msg) {
 			fprintf(stderr, "FULL MESSAGE RECEIVED\n");
-//			qnetd_client_msg_received(instance, client);
+			if (qdevice_net_msg_received(instance) == -1) {
+				return (-1);
+			}
 		} else {
 			errx(1, "net_socket_read in skipping msg state");
 		}
@@ -299,12 +396,15 @@ int main(void)
 	/*
 	 * Create and schedule send of preinit message to qnetd
 	 */
-	if (msg_create_preinit(&instance.send_buffer, "Cluster", 1, 1) == 0) {
+	instance.expected_msg_seq_num = 1;
+	if (msg_create_preinit(&instance.send_buffer, "Cluster", 1, instance.expected_msg_seq_num) == 0) {
 		errx(1, "Can't allocate buffer");
 	}
 	if (qdevice_net_schedule_send(&instance) != 0) {
 		errx(1, "Can't schedule send of preinit msg");
 	}
+
+	instance.state = QDEVICE_NET_STATE_WAITING_PREINIT_REPLY;
 
 	/*
 	 * Main loop
