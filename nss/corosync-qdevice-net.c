@@ -521,7 +521,8 @@ qdevice_net_instance_destroy(struct qdevice_net_instance *instance)
 	return (0);
 }
 
-int main(void)
+int
+main(void)
 {
 	struct qdevice_net_instance instance;
 
@@ -574,7 +575,7 @@ int main(void)
 	/*
 	 * Cleanup
 	 */
-	if (PR_Close(instance.socket) != SECSuccess) {
+	if (PR_Close(instance.socket) != PR_SUCCESS) {
 		err_nss();
 	}
 

@@ -184,7 +184,7 @@ handle_client(PRFileDesc *socket)
 		}
 	}
 
-	if (PR_DestroySocketPollFd(prstdin) != SECSuccess) {
+	if (PR_DestroySocketPollFd(prstdin) != PR_SUCCESS) {
 		err_nss();
 	}
 }
@@ -214,7 +214,7 @@ int main(void)
 
 	handle_client(client_socket);
 
-	if (PR_Close(client_socket) != SECSuccess) {
+	if (PR_Close(client_socket) != PR_SUCCESS) {
 		err_nss();
 	}
 

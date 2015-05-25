@@ -530,7 +530,7 @@ main(void)
 		qnetd_warn_nss();
 	}
 
-	if (PR_Cleanup() != SECSuccess) {
+	if (PR_Cleanup() != PR_SUCCESS) {
 		qnetd_warn_nss();
 	}
 

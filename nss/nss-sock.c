@@ -27,7 +27,7 @@ nss_sock_set_nonblocking(PRFileDesc *sock)
 	memset(&sock_opt, 0, sizeof(sock_opt));
 	sock_opt.option = PR_SockOpt_Nonblocking;
 	sock_opt.value.non_blocking = PR_TRUE;
-	if (PR_SetSocketOption(sock, &sock_opt) != SECSuccess) {
+	if (PR_SetSocketOption(sock, &sock_opt) != PR_SUCCESS) {
 		return (-1);
 	}
 
@@ -52,7 +52,7 @@ nss_sock_create_socket(PRIntn af, int reuse_addr)
 	if (reuse_addr) {
 		socket_option.option = PR_SockOpt_Reuseaddr;
 		socket_option.value.reuse_addr = PR_TRUE;
-		if (PR_SetSocketOption(socket, &socket_option) != SECSuccess) {
+		if (PR_SetSocketOption(socket, &socket_option) != PR_SUCCESS) {
 			return (NULL);
 	         }
 	}
@@ -79,7 +79,7 @@ nss_sock_create_listen_socket(const char *hostname, uint16_t port, PRIntn af)
 	if (hostname == NULL) {
 		memset(&addr, 0, sizeof(addr));
 
-		if (PR_InitializeNetAddr(PR_IpAddrAny, port, &addr) != SECSuccess) {
+		if (PR_InitializeNetAddr(PR_IpAddrAny, port, &addr) != PR_SUCCESS) {
 			return (NULL);
 		}
 		addr.raw.family = af;
@@ -89,7 +89,7 @@ nss_sock_create_listen_socket(const char *hostname, uint16_t port, PRIntn af)
 			return (NULL);
 		}
 
-		if (PR_Bind(socket, &addr) != SECSuccess) {
+		if (PR_Bind(socket, &addr) != PR_SUCCESS) {
 			PR_Close(socket);
 
 			return (NULL);
@@ -113,7 +113,7 @@ nss_sock_create_listen_socket(const char *hostname, uint16_t port, PRIntn af)
 					continue ;
 				}
 
-				if (PR_Bind(socket, &addr) != SECSuccess) {
+				if (PR_Bind(socket, &addr) != PR_SUCCESS) {
 					PR_Close(socket);
 					socket = NULL;
 
@@ -173,7 +173,7 @@ nss_sock_create_client_socket(const char *hostname, uint16_t port, PRIntn af, PR
 			continue ;
 		}
 
-		if ((res = PR_Connect(socket, &addr, timeout)) != SECSuccess) {
+		if ((res = PR_Connect(socket, &addr, timeout)) != PR_SUCCESS) {
 			PR_Close(socket);
 			socket = NULL;
 			connect_failed = 1;
@@ -266,7 +266,7 @@ nss_sock_start_ssl_as_server(PRFileDesc *input_sock, CERTCertificate *server_cer
 		return (NULL);
 	}
 
-	if (SSL_ConfigSecureServer(ssl_sock, server_cert, server_key, NSS_FindCertKEAType(server_cert)) != PR_SUCCESS) {
+	if (SSL_ConfigSecureServer(ssl_sock, server_cert, server_key, NSS_FindCertKEAType(server_cert)) != SECSuccess) {
 		return (NULL);
 	}
 
