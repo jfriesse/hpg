@@ -33,8 +33,6 @@
 #define NSS_DB_DIR	"nssdb"
 #define QNETD_CERT_NICKNAME	"QNetd Cert"
 
-#define QNETD_CLIENT_NET_LOCAL_NET_BUFFER	(16)
-
 #define QNETD_TLS_SUPPORTED			TLV_TLS_SUPPORTED
 #define QNETD_TLS_CLIENT_CERT_REQUIRED		1
 
@@ -203,7 +201,6 @@ qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *clie
 	res = msgio_read(client->socket, &client->receive_buffer, &client->msg_already_received_bytes,
 	    &client->skipping_msg);
 
-fprintf(stderr,"TU %d\n", res);
 	if (client->skipping_msg) {
 		fprintf(stderr, "SKIPPING MSG\n");
 	}
@@ -434,6 +431,11 @@ qnetd_instance_init(struct qnetd_instance *instance, size_t max_client_receive_s
 int
 qnetd_instance_destroy(struct qnetd_instance *instance)
 {
+	struct qnetd_client *client;
+
+	TAILQ_FOREACH(client, &instance->clients, entries) {
+		qnetd_client_disconnect(instance, client);
+	}
 
 	qnetd_poll_array_destroy(&instance->poll_array);
 	qnetd_clients_list_free(&instance->clients);

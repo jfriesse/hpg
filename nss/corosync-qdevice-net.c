@@ -90,7 +90,8 @@ static SECStatus
 qdevice_net_nss_get_client_auth_data(void *arg, PRFileDesc *socket, struct CERTDistNamesStr *caNames,
     struct CERTCertificateStr **pRetCert, struct SECKEYPrivateKeyStr **pRetKey)
 {
-	fprintf(stderr, "SENDING AUTH DATA\n");
+	qdevice_net_log(LOG_DEBUG, "Sending client auth data.");
+
 	return (NSS_GetClientAuthData(arg, socket, caNames, pRetCert, pRetKey));
 }
 
@@ -172,6 +173,83 @@ qdevice_net_check_tls_compatibility(enum tlv_tls_supported server_tls, enum tlv_
 	return (res);
 }
 
+int
+qdevice_net_msg_received_preinit(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+	qdevice_net_log(LOG_ERR, "Received unexpected preinit message. Disconnecting from server");
+
+	return (-1);
+}
+
+int
+qdevice_net_msg_check_seq_number(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+	if (!msg->seq_number_set || msg->seq_number != instance->expected_msg_seq_num) {
+		qdevice_net_log(LOG_ERR, "Received message doesn't contain seq_number or it's not expected one.");
+
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+qdevice_net_msg_received_preinit_reply(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+	int res;
+
+	if (instance->state != QDEVICE_NET_STATE_WAITING_PREINIT_REPLY) {
+		qdevice_net_log(LOG_ERR, "Received unexpected preinit reply message. Disconnecting from server");
+
+		return (-1);
+	}
+
+	if (qdevice_net_msg_check_seq_number(instance, msg) != 0) {
+		return (-1);
+	}
+
+	/*
+	 * Check TLS support
+	 */
+	if (!msg->tls_supported_set || !msg->tls_client_cert_required_set) {
+		qdevice_net_log(LOG_ERR, "Required tls_supported or tls_client_cert_required option is unset");
+
+		return (-1);
+	}
+
+	res = qdevice_net_check_tls_compatibility(msg->tls_supported, instance->tls_supported);
+	if (res == -1) {
+		qdevice_net_log(LOG_ERR, "Incompatible tls configuration (server %u client %u)",
+		    msg->tls_supported, instance->tls_supported);
+
+		return (-1);
+	} else if (res == 1) {
+		/*
+		 * Start TLS
+		 */
+		instance->expected_msg_seq_num++;
+		if (msg_create_starttls(&instance->send_buffer, 1, instance->expected_msg_seq_num) == 0) {
+			qdevice_net_log(LOG_ERR, "Can't allocate send buffer for starttls msg");
+
+			return (-1);
+		}
+
+		if (qdevice_net_schedule_send(instance) != 0) {
+			qdevice_net_log(LOG_ERR, "Can't schedule send of starttls msg");
+
+			return (-1);
+		}
+
+		instance->state = QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT;
+	} else if (res == 0) {
+		/*
+		 * Send init
+		 */
+		fprintf(stderr, "TODO\n");
+	}
+
+	return (0);
+}
 
 int
 qdevice_net_msg_received(struct qdevice_net_instance *instance)
@@ -195,84 +273,19 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 
 	ret_val = 0;
 
-	if (!msg.seq_number_set || msg.seq_number != instance->expected_msg_seq_num) {
-		qdevice_net_log(LOG_ERR, "Received message doesn't contain seq_number or it's not expected one.");
-
-		ret_val = -1;
-		goto return_res;
-	}
-
 	switch (msg.type) {
 	case MSG_TYPE_PREINIT:
-		qdevice_net_log(LOG_ERR, "Received unexpected preinit message. Disconnecting from server");
-		ret_val = -1;
-
-		goto return_res;
-
-		break;
+		ret_val = qdevice_net_msg_received_preinit(instance, &msg);
+		break ;
 	case MSG_TYPE_PREINIT_REPLY:
-		if (instance->state != QDEVICE_NET_STATE_WAITING_PREINIT_REPLY) {
-			qdevice_net_log(LOG_ERR, "Received unexpected preinit reply message. Disconnecting from server");
-
-			ret_val = -1;
-
-			goto return_res;
-		}
-
-		/*
-		 * Check TLS support
-		 */
-		if (!msg.tls_supported_set || !msg.tls_client_cert_required_set) {
-			qdevice_net_log(LOG_ERR, "Required tls_supported or tls_client_cert_required option is unset");
-
-			ret_val = -1;
-
-			goto return_res;
-		}
-
-		res = qdevice_net_check_tls_compatibility(msg.tls_supported, instance->tls_supported);
-		if (res == -1) {
-			qdevice_net_log(LOG_ERR, "Incompatible tls configuration (server %u client %u)",
-			    msg.tls_supported, instance->tls_supported);
-
-			ret_val = -1;
-
-			goto return_res;
-		} else if (res == 1) {
-			/*
-			 * Start TLS
-			 */
-			instance->expected_msg_seq_num++;
-			if (msg_create_starttls(&instance->send_buffer, 1, instance->expected_msg_seq_num) == 0) {
-				qdevice_net_log(LOG_ERR, "Can't allocate send buffer for starttls msg");
-				ret_val = -1;
-				goto return_res;
-			}
-			if (qdevice_net_schedule_send(instance) != 0) {
-				qdevice_net_log(LOG_ERR, "Can't schedule send of starttls msg");
-				ret_val = -1;
-				goto return_res;
-			}
-
-			instance->state = QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT;
-			fprintf(stderr, "Send starttls\n");
-		} else if (res == 0) {
-			/*
-			 * Send init
-			 */
-			fprintf(stderr, "TODO\n");
-		}
-
-		break;
+		ret_val = qdevice_net_msg_received_preinit_reply(instance, &msg);
+		break ;
 	default:
 		qdevice_net_log(LOG_ERR, "Received unsupported message %u. Disconnecting from server", msg.type);
 		ret_val = -1;
-		goto return_res;
-
-		break;
+		break ;
 	}
 
-return_res:
 	msg_decoded_destroy(&msg);
 
 	return (ret_val);
@@ -285,61 +298,57 @@ int
 qdevice_net_socket_read(struct qdevice_net_instance *instance)
 {
 	int res;
+	int ret_val;
+
+	ret_val = 0;
 
 	res = msgio_read(instance->socket, &instance->receive_buffer, &instance->msg_already_received_bytes,
 	    &instance->skipping_msg);
 
-	fprintf(stderr, "TU %d\n", res);
 	if (instance->skipping_msg) {
 		qdevice_net_log(LOG_DEBUG, "msgio_read set skipping_msg");
 	}
 
-	if (res == -1) {
+	switch (res) {
+	case 0:
+		/*
+		 * Partial read
+		 */
+		break ;
+	case -1:
 		qdevice_net_log(LOG_DEBUG, "Server closed connection");
-		return (-1);
-	}
-
-	if (res == -2) {
+		ret_val = -1;
+		break ;
+	case -2:
 		qdevice_net_log_nss(LOG_ERR, "Unhandled error when reading from server. Disconnecting from server");
-
-		return (-1);
-	}
-
-	if (res == -3) {
+		ret_val = -1;
+		break ;
+	case -3:
 		qdevice_net_log(LOG_ERR, "Can't store message header from server. Disconnecting from server");
-
-		return (-1);
-	}
-
-	if (res == -4) {
+		ret_val = -1;
+		break ;
+	case -4:
 		qdevice_net_log(LOG_ERR, "Can't store message from server. Disconnecting from server");
-
-		return (-1);
-	}
-
-	if (res == -5) {
+		ret_val = -1;
+		break ;
+	case -5:
 		qdevice_net_log(LOG_WARNING, "Server sent unsupported msg type %u. Disconnecting from server",
 			    msg_get_type(&instance->receive_buffer));
-
-		return (-1);
-	}
-
-	if (res == -6) {
+		ret_val = -1;
+		break ;
+	case -6:
 		qdevice_net_log(LOG_WARNING,
 		    "Server wants to send too long message %u bytes. Disconnecting from server",
 		    msg_get_len(&instance->receive_buffer));
-
-		return (-1);
-	}
-
-	if (res == 1) {
+		ret_val = -1;
+		break ;
+	case 1:
 		/*
 		 * Full message received / skipped
 		 */
 		if (!instance->skipping_msg) {
-			fprintf(stderr, "FULL MESSAGE RECEIVED\n");
 			if (qdevice_net_msg_received(instance) == -1) {
-				return (-1);
+				ret_val = -1;
 			}
 		} else {
 			errx(1, "net_socket_read in skipping msg state");
@@ -348,6 +357,34 @@ qdevice_net_socket_read(struct qdevice_net_instance *instance)
 		instance->skipping_msg = 0;
 		instance->msg_already_received_bytes = 0;
 		dynar_clean(&instance->receive_buffer);
+		break ;
+	default:
+		errx(1, "qdevice_net_socket_read unhandled error %d", res);
+		break ;
+	}
+
+	return (ret_val);
+}
+
+int
+qdevice_net_socket_write_finished(struct qdevice_net_instance *instance)
+{
+	PRFileDesc *new_pr_fd;
+
+	if (instance->state == QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT) {
+		/*
+		 * StartTLS sent to server. Begin with TLS handshake
+		 */
+		if ((new_pr_fd = nss_sock_start_ssl_as_client(instance->socket, QNETD_NSS_SERVER_CN,
+		    qdevice_net_nss_bad_cert_hook,
+		    qdevice_net_nss_get_client_auth_data, QDEVICE_NET_NSS_CLIENT_CERT_NICKNAME,
+		    0, NULL)) == NULL) {
+			qdevice_net_log_nss(LOG_ERR, "Can't start TLS");
+
+			return (-1);
+		}
+
+		instance->socket = new_pr_fd;
 	}
 
 	return (0);
@@ -357,28 +394,14 @@ int
 qdevice_net_socket_write(struct qdevice_net_instance *instance)
 {
 	int res;
-	PRFileDesc *new_pr_fd;
 
 	res = msgio_write(instance->socket, &instance->send_buffer, &instance->msg_already_sent_bytes);
 
 	if (res == 1) {
 		instance->sending_msg = 0;
 
-		if (instance->state == QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT) {
-			/*
-			 * StartTLS sent to server. Begin with TLS handshake
-			 */
-			fprintf(stderr, "Start TLS\n");
-			if ((new_pr_fd = nss_sock_start_ssl_as_client(instance->socket, QNETD_NSS_SERVER_CN,
-			    qdevice_net_nss_bad_cert_hook,
-			    qdevice_net_nss_get_client_auth_data, QDEVICE_NET_NSS_CLIENT_CERT_NICKNAME,
-			    0, NULL)) == NULL) {
-				qdevice_net_log_nss(LOG_ERR, "Can't start TLS");
-
-				return (-1);
-			}
-
-			instance->socket = new_pr_fd;
+		if (qdevice_net_socket_write_finished(instance) == -1) {
+			return (-1);
 		}
 	}
 
@@ -418,7 +441,6 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 	schedule_disconnect = 0;
 
 	if ((poll_res = PR_Poll(pfds, QDEVICE_NET_POLL_NO_FDS, PR_INTERVAL_NO_TIMEOUT)) > 0) {
-	fprintf(stderr, "poll_res = %u , in_flags = %u, out_flags = %u\n", poll_res, pfds[QDEVICE_NET_POLL_SOCKET].in_flags, pfds[QDEVICE_NET_POLL_SOCKET].out_flags);
 		for (i = 0; i < QDEVICE_NET_POLL_NO_FDS; i++) {
 			if (pfds[i].out_flags & PR_POLL_READ) {
 				switch (i) {
