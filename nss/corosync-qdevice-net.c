@@ -149,25 +149,25 @@ qdevice_net_check_tls_compatibility(enum tlv_tls_supported server_tls, enum tlv_
 	switch (server_tls) {
 	case TLV_TLS_UNSUPPORTED:
 		switch (client_tls) {
-		case TLV_TLS_UNSUPPORTED: res = 0; break ;
-		case TLV_TLS_SUPPORTED: res = 0; break ;
-		case TLV_TLS_REQUIRED: res = -1; break ;
+		case TLV_TLS_UNSUPPORTED: res = 0; break;
+		case TLV_TLS_SUPPORTED: res = 0; break;
+		case TLV_TLS_REQUIRED: res = -1; break;
 		}
-		break ;
+		break;
 	case TLV_TLS_SUPPORTED:
 		switch (client_tls) {
-		case TLV_TLS_UNSUPPORTED: res = 0; break ;
-		case TLV_TLS_SUPPORTED: res = 1; break ;
-		case TLV_TLS_REQUIRED: res = 1; break ;
+		case TLV_TLS_UNSUPPORTED: res = 0; break;
+		case TLV_TLS_SUPPORTED: res = 1; break;
+		case TLV_TLS_REQUIRED: res = 1; break;
 		}
-		break ;
+		break;
 	case TLV_TLS_REQUIRED:
 		switch (client_tls) {
-		case TLV_TLS_UNSUPPORTED: res = -1; break ;
-		case TLV_TLS_SUPPORTED: res = 1; break ;
-		case TLV_TLS_REQUIRED: res = 1; break ;
+		case TLV_TLS_UNSUPPORTED: res = -1; break;
+		case TLV_TLS_SUPPORTED: res = 1; break;
+		case TLV_TLS_REQUIRED: res = 1; break;
 		}
-		break ;
+		break;
 	}
 
 	return (res);
@@ -276,14 +276,14 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 	switch (msg.type) {
 	case MSG_TYPE_PREINIT:
 		ret_val = qdevice_net_msg_received_preinit(instance, &msg);
-		break ;
+		break;
 	case MSG_TYPE_PREINIT_REPLY:
 		ret_val = qdevice_net_msg_received_preinit_reply(instance, &msg);
-		break ;
+		break;
 	default:
 		qdevice_net_log(LOG_ERR, "Received unsupported message %u. Disconnecting from server", msg.type);
 		ret_val = -1;
-		break ;
+		break;
 	}
 
 	msg_decoded_destroy(&msg);
@@ -317,34 +317,34 @@ qdevice_net_socket_read(struct qdevice_net_instance *instance)
 		/*
 		 * Partial read
 		 */
-		break ;
+		break;
 	case -1:
 		qdevice_net_log(LOG_DEBUG, "Server closed connection");
 		ret_val = -1;
-		break ;
+		break;
 	case -2:
 		qdevice_net_log_nss(LOG_ERR, "Unhandled error when reading from server. Disconnecting from server");
 		ret_val = -1;
-		break ;
+		break;
 	case -3:
 		qdevice_net_log(LOG_ERR, "Can't store message header from server. Disconnecting from server");
 		ret_val = -1;
-		break ;
+		break;
 	case -4:
 		qdevice_net_log(LOG_ERR, "Can't store message from server. Disconnecting from server");
 		ret_val = -1;
-		break ;
+		break;
 	case -5:
 		qdevice_net_log(LOG_WARNING, "Server sent unsupported msg type %u. Disconnecting from server",
 			    msg_get_type(&instance->receive_buffer));
 		ret_val = -1;
-		break ;
+		break;
 	case -6:
 		qdevice_net_log(LOG_WARNING,
 		    "Server wants to send too long message %u bytes. Disconnecting from server",
 		    msg_get_len(&instance->receive_buffer));
 		ret_val = -1;
-		break ;
+		break;
 	case 1:
 		/*
 		 * Full message received / skipped
@@ -360,10 +360,10 @@ qdevice_net_socket_read(struct qdevice_net_instance *instance)
 		instance->skipping_msg = 0;
 		instance->msg_already_received_bytes = 0;
 		dynar_clean(&instance->receive_buffer);
-		break ;
+		break;
 	default:
 		errx(1, "qdevice_net_socket_read unhandled error %d", res);
-		break ;
+		break;
 	}
 
 	return (ret_val);
@@ -452,10 +452,10 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 						schedule_disconnect = 1;
 					}
 
-					break ;
+					break;
 				default:
 					errx(1, "Unhandled read poll descriptor %u", i);
-					break ;
+					break;
 				}
 			}
 

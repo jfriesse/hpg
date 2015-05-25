@@ -76,7 +76,7 @@ main(void)
 			/*
 			 * Timeout
 			 */
-			break ;
+			break;
 		} else {
 			j++;
 		}

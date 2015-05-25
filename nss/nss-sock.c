@@ -123,7 +123,7 @@ nss_sock_create_listen_socket(const char *hostname, uint16_t port, PRIntn af)
 				/*
 				 * Socket is sucesfully bound
 				 */
-				break ;
+				break;
 			}
 		}
 
@@ -182,7 +182,7 @@ nss_sock_create_client_socket(const char *hostname, uint16_t port, PRIntn af, PR
 		/*
 		 * Connection attempt finished
 		 */
-		break ;
+		break;
 	}
 
 	PR_FreeAddrInfo(addr_info);

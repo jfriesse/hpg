@@ -186,7 +186,7 @@ main_loop(void)
 							PR_REMOVE_AND_INIT_LINK(&iter->list);
 							free(iter);
 
-							break ;
+							break;
 						}
 					}
 				}
