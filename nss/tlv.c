@@ -59,6 +59,13 @@ tlv_add_u8(struct dynar *msg, enum tlv_opt_type opt_type, uint8_t u8)
 }
 
 int
+tlv_add_u16(struct dynar *msg, enum tlv_opt_type opt_type, uint16_t u16)
+{
+
+	return (tlv_add(msg, opt_type, sizeof(u16), &u16));
+}
+
+int
 tlv_add_string(struct dynar *msg, enum tlv_opt_type opt_type, const char *str)
 {
 
@@ -126,6 +133,13 @@ tlv_add_supported_options(struct dynar *msg, const enum tlv_opt_type *supported_
 
 	return (tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_OPTIONS,
 	    (uint16_t *)supported_options, no_supported_options));
+}
+
+int
+tlv_add_reply_error_code(struct dynar *msg, enum tlv_reply_error_code error_code)
+{
+
+	return (tlv_add_u16(msg, TLV_OPT_REPLY_ERROR_CODE, (uint16_t)error_code));
 }
 
 void

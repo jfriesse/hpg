@@ -8,6 +8,7 @@
 
 #include <nspr.h>
 #include "dynar.h"
+#include "tlv.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,7 @@ struct qnetd_client {
 	size_t msg_already_sent_bytes;
 	int sending_msg;	// Have message to sent
 	int skipping_msg;	// When incorrect message was received skip it
+	enum tlv_reply_error_code skipping_msg_reason;
 	TAILQ_ENTRY(qnetd_client) entries;
 };
 

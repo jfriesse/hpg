@@ -16,6 +16,7 @@ enum msg_type {
 	MSG_TYPE_PREINIT_REPLY = 1,
 	MSG_TYPE_STARTTLS = 2,
 	MSG_TYPE_INIT = 3,
+	MSG_TYPE_SERVER_ERROR = 5,
 };
 
 struct msg_decoded {
@@ -48,6 +49,9 @@ extern size_t		msg_create_starttls(struct dynar *msg, int add_msg_seq_number,
 extern size_t		msg_create_init(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
     const enum msg_type *supported_msgs, size_t no_supported_msgs,
     const enum tlv_opt_type *supported_opts, size_t no_supported_opts);
+
+extern size_t		msg_create_server_error(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
+    enum tlv_reply_error_code reply_error_code);
 
 extern size_t		msg_get_header_length(void);
 

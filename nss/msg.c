@@ -164,6 +164,34 @@ small_buf_err:
 }
 
 size_t
+msg_create_server_error(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
+    enum tlv_reply_error_code reply_error_code)
+{
+
+	dynar_clean(msg);
+
+	msg_add_type(msg, MSG_TYPE_SERVER_ERROR);
+	msg_add_len(msg);
+
+	if (add_msg_seq_number) {
+		if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (tlv_add_reply_error_code(msg, reply_error_code) == -1) {
+		goto small_buf_err;
+	}
+
+	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
+
+	return (dynar_size(msg));
+
+small_buf_err:
+	return (0);
+}
+
+size_t
 msg_create_init(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
     const enum msg_type *supported_msgs, size_t no_supported_msgs,
     const enum tlv_opt_type *supported_opts, size_t no_supported_opts)

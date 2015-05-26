@@ -108,6 +108,26 @@ qnetd_client_net_schedule_send(struct qnetd_client *client)
 }
 
 int
+qnetd_client_send_err(struct qnetd_client *client, int add_msg_seq_number, uint32_t msg_seq_number,
+    enum tlv_reply_error_code reply)
+{
+
+	if (msg_create_server_error(&client->send_buffer, add_msg_seq_number, msg_seq_number, reply) == 0) {
+		qnetd_log(LOG_ERR, "Can't alloc server error msg. Disconnecting client connection.");
+
+		return (-1);
+	};
+
+	if (qnetd_client_net_schedule_send(client) != 0) {
+		qnetd_log(LOG_ERR, "Can't schedule send of error message. Disconnecting client connection.");
+
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
 qnetd_client_msg_received_preinit(struct qnetd_instance *instance, struct qnetd_client *client,
 	const struct msg_decoded *msg)
 {
@@ -119,7 +139,7 @@ qnetd_client_msg_received_preinit(struct qnetd_instance *instance, struct qnetd_
 	};
 
 	if (qnetd_client_net_schedule_send(client) != 0) {
-		qnetd_log(LOG_ERR, "Can't schedule send of message. Disconnecting client connection.");
+		qnetd_log(LOG_ERR, "Can't schedule send of preinit message. Disconnecting client connection.");
 
 		return (-1);
 	}
@@ -133,7 +153,11 @@ qnetd_client_msg_received_preinit_reply(struct qnetd_instance *instance, struct 
 {
 
 	qnetd_log(LOG_ERR, "Received preinit reply. Sending back error message");
-	// TODO
+
+	if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+	    TLV_REPLY_ERROR_CODE_UNEXPECTED_MESSAGE) != 0) {
+		return (-1);
+	}
 
 	return (0);
 }
@@ -173,9 +197,12 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 		qnetd_client_log_msg_decode_error(res);
 		qnetd_log(LOG_INFO, "Sending back error message");
 
-		// TODO
+		if (qnetd_client_send_err(client, msg.seq_number_set, msg.seq_number,
+		    TLV_REPLY_ERROR_CODE_ERROR_DECODING_MSG) != 0) {
+			return (-1);
+		}
 
-		return (-1);
+		return (0);
 	}
 
 	ret_val = 0;
@@ -193,7 +220,12 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 	default:
 		qnetd_log(LOG_ERR, "Unsupported message %u received from client. Sending back error message",
 		    msg.type);
-		// TODO
+
+		if (qnetd_client_send_err(client, msg.seq_number_set, msg.seq_number,
+		    TLV_REPLY_ERROR_CODE_UNSUPPORTED_MESSAGE) != 0) {
+			ret_val = -1;
+		}
+
 		break;
 	}
 
@@ -285,15 +317,18 @@ qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *clie
 		break;
 	case -4:
 		qnetd_log(LOG_ERR, "Can't store message from client. Skipping message");
+		client->skipping_msg_reason = TLV_REPLY_ERROR_CODE_ERROR_DECODING_MSG;
 		break;
 	case -5:
 		qnetd_log(LOG_WARNING, "Client sent unsupported msg type %u. Skipping message",
 			    msg_get_type(&client->receive_buffer));
+		client->skipping_msg_reason = TLV_REPLY_ERROR_CODE_UNSUPPORTED_MESSAGE;
 		break;
 	case -6:
 		qnetd_log(LOG_WARNING,
 		    "Client wants to send too long message %u bytes. Skipping message",
 		    msg_get_len(&client->receive_buffer));
+		client->skipping_msg_reason = TLV_REPLY_ERROR_CODE_MESSAGE_TOO_LONG;
 		break;
 	case 1:
 		/*
@@ -304,11 +339,13 @@ qnetd_client_net_read(struct qnetd_instance *instance, struct qnetd_client *clie
 				ret_val = -1;
 			}
 		} else {
-			// TODO - Send error back to client
-			fprintf(stderr, "FULL MESSAGE SKIPPED\n");
+			if (qnetd_client_send_err(client, 0, 0, client->skipping_msg_reason) != 0) {
+				ret_val = -1;
+			}
 		}
 
 		client->skipping_msg = 0;
+		client->skipping_msg_reason = TLV_REPLY_ERROR_CODE_NO_ERROR;
 		client->msg_already_received_bytes = 0;
 		dynar_clean(&client->receive_buffer);
 		break;
