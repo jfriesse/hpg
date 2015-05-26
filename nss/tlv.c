@@ -10,6 +10,17 @@
 #define TLV_TYPE_LENGTH		2
 #define TLV_LENGTH_LENGTH	2
 
+#define TLV_STATIC_SUPPORTED_OPTIONS_SIZE      6
+
+enum tlv_opt_type tlv_static_supported_options[TLV_STATIC_SUPPORTED_OPTIONS_SIZE] = {
+    TLV_OPT_MSG_SEQ_NUMBER,
+    TLV_OPT_CLUSTER_NAME,
+    TLV_OPT_TLS_SUPPORTED,
+    TLV_OPT_TLS_CLIENT_CERT_REQUIRED,
+    TLV_OPT_SUPPORTED_MESSAGES,
+    TLV_OPT_SUPPORTED_OPTIONS,
+};
+
 int
 tlv_add(struct dynar *msg, enum tlv_opt_type opt_type, uint16_t opt_len, const void *value)
 {
@@ -80,6 +91,41 @@ tlv_add_tls_client_cert_required(struct dynar *msg, int tls_client_cert_required
 {
 
 	return (tlv_add_u8(msg, TLV_OPT_TLS_CLIENT_CERT_REQUIRED, tls_client_cert_required));
+}
+
+int
+tlv_add_u16_array(struct dynar *msg, enum tlv_opt_type opt_type, const uint16_t *array, size_t array_size)
+{
+	size_t i;
+	uint16_t *nu16a;
+	uint16_t opt_len;
+	int res;
+
+	nu16a = malloc(sizeof(uint16_t) * array_size);
+	if (nu16a == NULL) {
+		return (-1);
+	}
+
+	for (i = 0; i < array_size; i++) {
+		nu16a[i] = htons(array[i]);
+	}
+
+	opt_len = sizeof(uint16_t) * array_size;
+
+	res = tlv_add(msg, opt_type, opt_len, nu16a);
+
+	free(nu16a);
+
+	return (res);
+}
+
+int
+tlv_add_supported_options(struct dynar *msg, const enum tlv_opt_type *supported_options,
+    size_t no_supported_options)
+{
+
+	return (tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_OPTIONS,
+	    (uint16_t *)supported_options, no_supported_options));
 }
 
 void
@@ -214,4 +260,12 @@ tlv_iter_decode_str(struct tlv_iterator *tlv_iter, char **str, size_t *str_len)
 	*str_len = opt_len;
 
 	return (0);
+}
+
+void
+tlv_get_supported_options(enum tlv_opt_type **supported_options, size_t *no_supported_options)
+{
+
+	*supported_options = tlv_static_supported_options;
+	*no_supported_options = TLV_STATIC_SUPPORTED_OPTIONS_SIZE;
 }

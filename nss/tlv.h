@@ -15,6 +15,8 @@ enum tlv_opt_type {
 	TLV_OPT_CLUSTER_NAME = 1,
 	TLV_OPT_TLS_SUPPORTED = 2,
 	TLV_OPT_TLS_CLIENT_CERT_REQUIRED = 3,
+	TLV_OPT_SUPPORTED_MESSAGES = 4,
+	TLV_OPT_SUPPORTED_OPTIONS = 5,
 };
 
 enum tlv_tls_supported {
@@ -34,7 +36,15 @@ extern int			 tlv_add(struct dynar *msg, enum tlv_opt_type opt_type, uint16_t op
 
 extern int			 tlv_add_u32(struct dynar *msg, enum tlv_opt_type opt_type, uint32_t u32);
 
+extern int			 tlv_add_u8(struct dynar *msg, enum tlv_opt_type opt_type, uint8_t u8);
+
 extern int			 tlv_add_string(struct dynar *msg, enum tlv_opt_type opt_type, const char *str);
+
+extern int			 tlv_add_u16_array(struct dynar *msg, enum tlv_opt_type opt_type,
+    const uint16_t *array, size_t array_size);
+
+extern int			 tlv_add_supported_options(struct dynar *msg,
+    const enum tlv_opt_type *supported_options, size_t no_supported_options);
 
 extern int			 tlv_add_msg_seq_number(struct dynar *msg, uint32_t msg_seq_number);
 
@@ -60,6 +70,9 @@ extern int			 tlv_iter_decode_u8(struct tlv_iterator *tlv_iter, uint8_t *res);
 extern int			 tlv_iter_decode_u32(struct tlv_iterator *tlv_iter, uint32_t *res);
 
 extern int			 tlv_iter_decode_str(struct tlv_iterator *tlv_iter, char **str, size_t *str_len);
+
+extern void			 tlv_get_supported_options(enum tlv_opt_type **supported_options,
+    size_t *no_supported_options);
 
 #ifdef __cplusplus
 }

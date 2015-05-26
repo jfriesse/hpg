@@ -45,7 +45,7 @@
 enum qdevice_net_state {
 	QDEVICE_NET_STATE_WAITING_PREINIT_REPLY,
 	QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT,
-	QDEVICE_NET_STATE_WAITING_SERVER_INIT_REPLY,
+	QDEVICE_NET_STATE_WAITING_INIT_REPLY,
 };
 
 struct qdevice_net_instance {
@@ -194,6 +194,37 @@ qdevice_net_msg_check_seq_number(struct qdevice_net_instance *instance, const st
 }
 
 int
+qdevice_net_send_init(struct qdevice_net_instance *instance)
+{
+	enum msg_type *supported_msgs;
+	size_t no_supported_msgs;
+	enum tlv_opt_type *supported_opts;
+	size_t no_supported_opts;
+
+	tlv_get_supported_options(&supported_opts, &no_supported_opts);
+	msg_get_supported_messages(&supported_msgs, &no_supported_msgs);
+	instance->expected_msg_seq_num++;
+
+	if (msg_create_init(&instance->send_buffer, 1, instance->expected_msg_seq_num,
+	    supported_msgs, no_supported_msgs, supported_opts, no_supported_opts) == 0) {
+		qdevice_net_log(LOG_ERR, "Can't allocate send buffer for init msg");
+
+		return (-1);
+	}
+
+	if (qdevice_net_schedule_send(instance) != 0) {
+		qdevice_net_log(LOG_ERR, "Can't schedule send of init msg");
+
+		return (-1);
+	}
+
+	instance->state = QDEVICE_NET_STATE_WAITING_INIT_REPLY;
+
+	return (0);
+}
+
+
+int
 qdevice_net_msg_received_preinit_reply(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
 {
 	int res;
@@ -242,10 +273,9 @@ qdevice_net_msg_received_preinit_reply(struct qdevice_net_instance *instance, co
 
 		instance->state = QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT;
 	} else if (res == 0) {
-		/*
-		 * Send init
-		 */
-		fprintf(stderr, "TODO\n");
+		if (qdevice_net_send_init(instance) != 0) {
+			return (-1);
+		}
 	}
 
 	return (0);
@@ -384,6 +414,13 @@ qdevice_net_socket_write_finished(struct qdevice_net_instance *instance)
 		    0, NULL)) == NULL) {
 			qdevice_net_log_nss(LOG_ERR, "Can't start TLS");
 
+			return (-1);
+		}
+
+		/*
+		 * And send init msg
+		 */
+		if (qdevice_net_send_init(instance) != 0) {
 			return (-1);
 		}
 
@@ -540,7 +577,7 @@ main(void)
 	}
 
 	if (qdevice_net_instance_init(&instance, QDEVICE_NET_MAX_MSG_RECEIVE_SIZE,
-	    QDEVICE_NET_MAX_MSG_SEND_SIZE, TLV_TLS_REQUIRED) == -1) {
+	    QDEVICE_NET_MAX_MSG_SEND_SIZE, QDEVICE_NET_TLS_SUPPORTED) == -1) {
 		errx(1, "Can't initialize qdevice-net");
 	}
 

@@ -10,6 +10,15 @@
 #define MSG_TYPE_LENGTH		2
 #define MSG_LENGTH_LENGTH	4
 
+#define MSG_STATIC_SUPPORTED_MESSAGES_SIZE	4
+
+enum msg_type msg_static_supported_messages[MSG_STATIC_SUPPORTED_MESSAGES_SIZE] = {
+    MSG_TYPE_PREINIT,
+    MSG_TYPE_PREINIT_REPLY,
+    MSG_TYPE_STARTTLS,
+    MSG_TYPE_INIT,
+};
+
 size_t
 msg_get_header_length(void)
 {
@@ -154,6 +163,44 @@ small_buf_err:
 	return (0);
 }
 
+size_t
+msg_create_init(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
+    const enum msg_type *supported_msgs, size_t no_supported_msgs,
+    const enum tlv_opt_type *supported_opts, size_t no_supported_opts)
+{
+
+	dynar_clean(msg);
+
+	msg_add_type(msg, MSG_TYPE_INIT);
+	msg_add_len(msg);
+
+	if (add_msg_seq_number) {
+		if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (supported_msgs != NULL && no_supported_msgs > 0) {
+		if (tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_MESSAGES,
+		    (uint16_t *)supported_msgs, no_supported_msgs) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (supported_opts != NULL && no_supported_opts > 0) {
+		if (tlv_add_supported_options(msg, supported_opts, no_supported_opts) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
+
+	return (dynar_size(msg));
+
+small_buf_err:
+	return (0);
+}
+
 int
 msg_is_valid_msg_type(const struct dynar *msg)
 {
@@ -265,4 +312,12 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 	}
 
 	return (0);
+}
+
+void
+msg_get_supported_messages(enum msg_type **supported_messages, size_t *no_supported_messages)
+{
+
+	*supported_messages = msg_static_supported_messages;
+	*no_supported_messages = MSG_STATIC_SUPPORTED_MESSAGES_SIZE;
 }
