@@ -242,6 +242,7 @@ msg_is_valid_msg_type(const struct dynar *msg)
 	case MSG_TYPE_PREINIT:
 	case MSG_TYPE_PREINIT_REPLY:
 	case MSG_TYPE_STARTTLS:
+	case MSG_TYPE_SERVER_ERROR:
 		res = 1;
 		break;
 	default:
@@ -283,6 +284,7 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 	struct tlv_iterator tlv_iter;
 	enum tlv_opt_type opt_type;
 	int iter_res;
+	int res;
 
 	msg_decoded_destroy(decoded_msg);
 
@@ -308,24 +310,41 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 			}
 			break;
 		case TLV_OPT_TLS_SUPPORTED:
-			if (tlv_iter_decode_u8(&tlv_iter, (uint8_t *)&decoded_msg->tls_supported) != 0) {
-				return (-1);
-			}
-
-			if (decoded_msg->tls_supported != TLV_TLS_UNSUPPORTED &&
-			    decoded_msg->tls_supported != TLV_TLS_SUPPORTED &&
-			    decoded_msg->tls_supported != TLV_TLS_REQUIRED) {
-				return (-4);
+			if ((res = tlv_iter_decode_tls_supported(&tlv_iter, &decoded_msg->tls_supported)) != 0) {
+				return (res);
 			}
 
 			decoded_msg->tls_supported_set = 1;
 			break;
 		case TLV_OPT_TLS_CLIENT_CERT_REQUIRED:
-			if (tlv_iter_decode_u8(&tlv_iter, (uint8_t *)&decoded_msg->tls_client_cert_required) != 0) {
+			if (tlv_iter_decode_client_cert_required(&tlv_iter, &decoded_msg->tls_client_cert_required) != 0) {
 				return (-1);
 			}
 
 			decoded_msg->tls_client_cert_required_set = 1;
+			break;
+		case TLV_OPT_SUPPORTED_MESSAGES:
+			free(decoded_msg->supported_messages);
+
+			if ((res = tlv_iter_decode_u16_array(&tlv_iter, (uint16_t **)&decoded_msg->supported_messages,
+			    &decoded_msg->no_supported_messages)) != 0) {
+				return (res);
+			}
+			break;
+		case TLV_OPT_SUPPORTED_OPTIONS:
+			free(decoded_msg->supported_options);
+
+			if ((res = tlv_iter_decode_supported_options(&tlv_iter, &decoded_msg->supported_options,
+			    &decoded_msg->no_supported_options)) != 0) {
+				return (res);
+			}
+			break;
+		case TLV_OPT_REPLY_ERROR_CODE:
+			if (tlv_iter_decode_reply_error_code(&tlv_iter, &decoded_msg->reply_error_code) != 0) {
+				return (-1);
+			}
+
+			decoded_msg->reply_error_code_set = 1;
 			break;
 		default:
 			/*

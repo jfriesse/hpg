@@ -85,9 +85,26 @@ extern int			 tlv_iter_next(struct tlv_iterator *tlv_iter);
 
 extern int			 tlv_iter_decode_u8(struct tlv_iterator *tlv_iter, uint8_t *res);
 
+extern int			 tlv_iter_decode_tls_supported(struct tlv_iterator *tlv_iter,
+    enum tlv_tls_supported *tls_supported);
+
 extern int			 tlv_iter_decode_u32(struct tlv_iterator *tlv_iter, uint32_t *res);
 
 extern int			 tlv_iter_decode_str(struct tlv_iterator *tlv_iter, char **str, size_t *str_len);
+
+extern int			 tlv_iter_decode_client_cert_required(struct tlv_iterator *tlv_iter,
+    uint8_t *client_cert_required);
+
+extern int			 tlv_iter_decode_u16_array(struct tlv_iterator *tlv_iter,
+    uint16_t **u16a, size_t *no_items);
+
+extern int			 tlv_iter_decode_supported_options(struct tlv_iterator *tlv_iter,
+    enum tlv_opt_type **supported_options, size_t *no_supported_options);
+
+extern int			 tlv_iter_decode_u16(struct tlv_iterator *tlv_iter, uint16_t *u16);
+
+extern int			 tlv_iter_decode_reply_error_code(struct tlv_iterator *tlv_iter,
+    enum tlv_reply_error_code *reply_error_code);
 
 extern void			 tlv_get_supported_options(enum tlv_opt_type **supported_options,
     size_t *no_supported_options);

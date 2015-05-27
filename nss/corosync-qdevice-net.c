@@ -282,6 +282,29 @@ qdevice_net_msg_received_preinit_reply(struct qdevice_net_instance *instance, co
 }
 
 int
+qdevice_net_msg_received_stattls(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+
+	qdevice_net_log(LOG_ERR, "Received unexpected starttls message. Disconnecting from server");
+
+	return (-1);
+}
+
+int
+qdevice_net_msg_received_server_error(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+
+	if (!msg->reply_error_code_set) {
+		qdevice_net_log(LOG_ERR, "Received server error without error code set. Disconnecting from server");
+	} else {
+		qdevice_net_log(LOG_ERR, "Received server error %"PRIu16". Disconnecting from server",
+		    msg->reply_error_code);
+	}
+
+	return (-1);
+}
+
+int
 qdevice_net_msg_received(struct qdevice_net_instance *instance)
 {
 	struct msg_decoded msg;
@@ -309,6 +332,12 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 		break;
 	case MSG_TYPE_PREINIT_REPLY:
 		ret_val = qdevice_net_msg_received_preinit_reply(instance, &msg);
+		break;
+	case MSG_TYPE_STARTTLS:
+		ret_val = qdevice_net_msg_received_stattls(instance, &msg);
+		break;
+	case MSG_TYPE_SERVER_ERROR:
+		ret_val = qdevice_net_msg_received_server_error(instance, &msg);
 		break;
 	default:
 		qdevice_net_log(LOG_ERR, "Received unsupported message %u. Disconnecting from server", msg.type);

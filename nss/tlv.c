@@ -61,8 +61,11 @@ tlv_add_u8(struct dynar *msg, enum tlv_opt_type opt_type, uint8_t u8)
 int
 tlv_add_u16(struct dynar *msg, enum tlv_opt_type opt_type, uint16_t u16)
 {
+	uint16_t nu16;
 
-	return (tlv_add(msg, opt_type, sizeof(u16), &u16));
+	nu16 = htons(u16);
+
+	return (tlv_add(msg, opt_type, sizeof(nu16), &nu16));
 }
 
 int
@@ -253,6 +256,13 @@ tlv_iter_decode_u8(struct tlv_iterator *tlv_iter, uint8_t *res)
 }
 
 int
+tlv_iter_decode_client_cert_required(struct tlv_iterator *tlv_iter, uint8_t *client_cert_required)
+{
+
+	return (tlv_iter_decode_u8(tlv_iter, client_cert_required));
+}
+
+int
 tlv_iter_decode_str(struct tlv_iterator *tlv_iter, char **str, size_t *str_len)
 {
 	const char *opt_data;
@@ -272,6 +282,90 @@ tlv_iter_decode_str(struct tlv_iterator *tlv_iter, char **str, size_t *str_len)
 
 	*str = tmp_str;
 	*str_len = opt_len;
+
+	return (0);
+}
+
+int
+tlv_iter_decode_u16_array(struct tlv_iterator *tlv_iter, uint16_t **u16a, size_t *no_items)
+{
+	uint16_t opt_len;
+	uint16_t *u16a_res;
+	size_t i;
+
+	opt_len = tlv_iter_get_len(tlv_iter);
+
+	if (opt_len % 2 != 0) {
+		return (-1);
+	}
+
+	*no_items = opt_len / sizeof(uint16_t);
+
+	u16a_res = malloc(sizeof(uint16_t) * *no_items);
+	if (u16a_res == NULL) {
+		return (-2);
+	}
+
+	memcpy(u16a_res, tlv_iter_get_data(tlv_iter), opt_len);
+
+	for (i = 0; i < *no_items; i++) {
+		u16a_res[i] = ntohs(u16a_res[i]);
+	}
+
+	return (0);
+}
+
+int
+tlv_iter_decode_supported_options(struct tlv_iterator *tlv_iter, enum tlv_opt_type **supported_options,
+    size_t *no_supported_options)
+{
+
+	return (tlv_iter_decode_u16_array(tlv_iter, (uint16_t **)supported_options, no_supported_options));
+}
+
+int
+tlv_iter_decode_u16(struct tlv_iterator *tlv_iter, uint16_t *u16)
+{
+	const char *opt_data;
+	uint16_t opt_len;
+	uint16_t nu16;
+
+	opt_len = tlv_iter_get_len(tlv_iter);
+	opt_data = tlv_iter_get_data(tlv_iter);
+
+	if (opt_len != sizeof(nu16)) {
+		return (-1);
+	}
+
+	memcpy(&nu16, opt_data, sizeof(nu16));
+	*u16 = ntohs(nu16);
+
+	return (0);
+}
+
+int
+tlv_iter_decode_reply_error_code(struct tlv_iterator *tlv_iter, enum tlv_reply_error_code *reply_error_code)
+{
+
+	return (tlv_iter_decode_u16(tlv_iter, (uint16_t *)reply_error_code));
+}
+
+int
+tlv_iter_decode_tls_supported(struct tlv_iterator *tlv_iter, enum tlv_tls_supported *tls_supported)
+{
+	uint8_t u8;
+
+	if (tlv_iter_decode_u8(tlv_iter, &u8) != 0) {
+		return (-1);
+	}
+
+	*tls_supported = u8;
+
+	if (*tls_supported != TLV_TLS_UNSUPPORTED &&
+	    *tls_supported != TLV_TLS_SUPPORTED &&
+	    *tls_supported != TLV_TLS_REQUIRED) {
+		return (-4);
+	}
 
 	return (0);
 }

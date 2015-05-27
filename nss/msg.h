@@ -21,20 +21,20 @@ enum msg_type {
 
 struct msg_decoded {
 	enum msg_type type;
-	char seq_number_set;
+	uint8_t seq_number_set;
 	uint32_t seq_number;		// Only valid if seq_number_set != 0
 	size_t cluster_name_len;
 	char *cluster_name;		// Valid only if != NULL. Trailing \0 is added but not counted in cluster_name_len
-	char tls_supported_set;
+	uint8_t tls_supported_set;
 	enum tlv_tls_supported tls_supported;	// Valid only if tls_supported_set != 0.
-	char tls_client_cert_required_set;
-	char tls_client_cert_required;		// Valid only if tls_client_cert_required_set != 0
+	uint8_t tls_client_cert_required_set;
+	uint8_t tls_client_cert_required;		// Valid only if tls_client_cert_required_set != 0
 	size_t no_supported_messages;
-	uint16_t *supported_messages;	// Valid only if != NULL
+	enum msg_type *supported_messages;	// Valid only if != NULL
 	size_t no_supported_options;
-	uint16_t *supported_options;	// Valid only if != NULL
-	char reply_error_code_set;
-	char reply_error_code;		// Valid only if reply_error_code_set != 0
+	enum tlv_opt_type *supported_options;	// Valid only if != NULL
+	uint8_t reply_error_code_set;
+	enum tlv_reply_error_code reply_error_code;	// Valid only if reply_error_code_set != 0
 };
 
 extern size_t		msg_create_preinit(struct dynar *msg, const char *cluster_name,
