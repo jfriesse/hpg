@@ -28,6 +28,8 @@
 #define QNETD_NSS_SERVER_CN		"Qnetd Server"
 #define QDEVICE_NET_NSS_CLIENT_CERT_NICKNAME	"Cluster Cert"
 
+#define QDEVICE_NET_CLUSTER_NAME		"Testcluster"
+
 #define QDEVICE_NET_MAX_MSG_RECEIVE_SIZE	(1 << 15)
 #define QDEVICE_NET_MAX_MSG_SEND_SIZE		(1 << 15)
 
@@ -626,7 +628,7 @@ main(void)
 	 * Create and schedule send of preinit message to qnetd
 	 */
 	instance.expected_msg_seq_num = 1;
-	if (msg_create_preinit(&instance.send_buffer, "Cluster", 1, instance.expected_msg_seq_num) == 0) {
+	if (msg_create_preinit(&instance.send_buffer, QDEVICE_NET_CLUSTER_NAME, 1, instance.expected_msg_seq_num) == 0) {
 		errx(1, "Can't allocate buffer");
 	}
 	if (qdevice_net_schedule_send(&instance) != 0) {

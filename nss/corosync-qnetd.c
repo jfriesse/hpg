@@ -131,6 +131,34 @@ int
 qnetd_client_msg_received_preinit(struct qnetd_instance *instance, struct qnetd_client *client,
 	const struct msg_decoded *msg)
 {
+
+	if (msg->cluster_name == NULL) {
+		qnetd_log(LOG_ERR, "Received preinit message without cluster name. Sending error reply.");
+
+		if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+		    TLV_REPLY_ERROR_CODE_DOESNT_CONTAIN_REQUIRED_OPTION) != 0) {
+			return (-1);
+		}
+
+		return (0);
+	}
+
+	client->cluster_name = malloc(msg->cluster_name_len + 1);
+	if (client->cluster_name == NULL) {
+		qnetd_log(LOG_ERR, "Can't allocate cluster name. Sending error reply.");
+
+		if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+		    TLV_REPLY_ERROR_CODE_INTERNAL_ERROR) != 0) {
+			return (-1);
+		}
+
+		return (0);
+	}
+
+	memcpy(client->cluster_name, msg->cluster_name, msg->cluster_name_len + 1);
+	client->cluster_name_len = msg->cluster_name_len;
+	client->preinit_received = 1;
+
 	if (msg_create_preinit_reply(&client->send_buffer, msg->seq_number_set, msg->seq_number,
 	    instance->tls_supported, instance->tls_client_cert_required) == 0) {
 		qnetd_log(LOG_ERR, "Can't alloc preinit reply msg. Disconnecting client connection.");
@@ -168,6 +196,17 @@ qnetd_client_msg_received_starttls(struct qnetd_instance *instance, struct qnetd
 {
 	PRFileDesc *new_pr_fd;
 
+	if (!client->preinit_received) {
+		qnetd_log(LOG_ERR, "Received starttls before preinit message. Sending error reply.");
+
+		if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+		    TLV_REPLY_ERROR_CODE_PREINIT_REQUIRED) != 0) {
+			return (-1);
+		}
+
+		return (0);
+	}
+
 	if ((new_pr_fd = nss_sock_start_ssl_as_server(client->socket, instance->server.cert,
 	    instance->server.private_key, instance->tls_client_cert_required, 0, NULL)) == NULL) {
 		qnetd_log_nss(LOG_ERR, "Can't start TLS. Disconnecting client.");
@@ -175,6 +214,8 @@ qnetd_client_msg_received_starttls(struct qnetd_instance *instance, struct qnetd
 		return (-1);
 	}
 
+	client->tls_started = 1;
+	client->tls_peer_certificate_verified = 0;
 	client->socket = new_pr_fd;
 
 	return (0);
@@ -194,10 +235,100 @@ qnetd_client_msg_received_server_error(struct qnetd_instance *instance, struct q
 	return (0);
 }
 
+/*
+ *  0 - Success
+ * -1 - Disconnect client
+ * -2 - Error reply sent, but no need to disconnect client
+ */
+int
+qnetd_client_check_tls(struct qnetd_instance *instance, struct qnetd_client *client, const struct msg_decoded *msg)
+{
+	int check_certificate;
+	int tls_required;
+	CERTCertificate *peer_cert;
+
+	check_certificate = 0;
+	tls_required = 0;
+
+	switch (instance->tls_supported) {
+	case TLV_TLS_UNSUPPORTED:
+		tls_required = 0;
+		check_certificate = 0;
+		break;
+	case TLV_TLS_SUPPORTED:
+		tls_required = 0;
+
+		if (client->tls_started && instance->tls_client_cert_required && !client->tls_peer_certificate_verified) {
+			check_certificate = 1;
+		}
+	case TLV_TLS_REQUIRED:
+		tls_required = 1;
+
+		if (instance->tls_client_cert_required && !client->tls_peer_certificate_verified) {
+			check_certificate = 1;
+		}
+		break;
+	default:
+		errx(1, "Unhandled instance tls supported %u\n", instance->tls_supported);
+		break;
+	}
+
+	if (tls_required && !client->tls_started) {
+		qnetd_log(LOG_ERR, "TLS is required but doesn't started yet. Sending back error message");
+
+		if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+		    TLV_REPLY_ERROR_CODE_TLS_REQUIRED) != 0) {
+			return (-1);
+		}
+
+		return (-2);
+	}
+
+	if (check_certificate) {
+		peer_cert = SSL_PeerCertificate(client->socket);
+
+		if (peer_cert == NULL) {
+			qnetd_log(LOG_ERR, "Client doesn't sent valid certificate. Disconnecting client");
+
+			return (-1);
+		}
+
+		if (CERT_VerifyCertName(peer_cert, client->cluster_name) != SECSuccess) {
+			qnetd_log(LOG_ERR, "Client doesn't sent certificate with valid CN. Disconnecting client");
+
+			CERT_DestroyCertificate(peer_cert);
+
+			return (-1);
+		}
+
+		CERT_DestroyCertificate(peer_cert);
+
+		client->tls_peer_certificate_verified = 1;
+	}
+
+	return (0);
+}
+
 int
 qnetd_client_msg_received_init(struct qnetd_instance *instance, struct qnetd_client *client,
 	const struct msg_decoded *msg)
 {
+	int res;
+
+	if ((res = qnetd_client_check_tls(instance, client, msg)) != 0) {
+		return (res == -1 ? -1 : 0);
+	}
+
+	if (!client->preinit_received) {
+		qnetd_log(LOG_ERR, "Received init before preinit message. Sending error reply.");
+
+		if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+		    TLV_REPLY_ERROR_CODE_PREINIT_REQUIRED) != 0) {
+			return (-1);
+		}
+
+		return (0);
+	}
 
 	if (msg->supported_messages != NULL) {
 		/*
