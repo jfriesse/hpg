@@ -133,9 +133,24 @@ int
 tlv_add_supported_options(struct dynar *msg, const enum tlv_opt_type *supported_options,
     size_t no_supported_options)
 {
+	uint16_t *u16a;
+	size_t i;
+	int res;
 
-	return (tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_OPTIONS,
-	    (uint16_t *)supported_options, no_supported_options));
+	u16a = malloc(sizeof(*u16a) * no_supported_options);
+	if (u16a == NULL) {
+		return (-1);
+	}
+
+	for (i = 0; i < no_supported_options; i++) {
+		u16a[i] = (uint16_t)supported_options[i];
+	}
+
+	res = (tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_OPTIONS, u16a, no_supported_options));
+
+	free(u16a);
+
+	return (res);
 }
 
 int
@@ -295,7 +310,7 @@ tlv_iter_decode_u16_array(struct tlv_iterator *tlv_iter, uint16_t **u16a, size_t
 
 	opt_len = tlv_iter_get_len(tlv_iter);
 
-	if (opt_len % 2 != 0) {
+	if (opt_len % sizeof(uint16_t) != 0) {
 		return (-1);
 	}
 
@@ -312,6 +327,8 @@ tlv_iter_decode_u16_array(struct tlv_iterator *tlv_iter, uint16_t **u16a, size_t
 		u16a_res[i] = ntohs(u16a_res[i]);
 	}
 
+	*u16a = u16a_res;
+
 	return (0);
 }
 
@@ -319,8 +336,31 @@ int
 tlv_iter_decode_supported_options(struct tlv_iterator *tlv_iter, enum tlv_opt_type **supported_options,
     size_t *no_supported_options)
 {
+	uint16_t *u16a;
+	enum tlv_opt_type *tlv_opt_array;
+	size_t i;
+	int res;
 
-	return (tlv_iter_decode_u16_array(tlv_iter, (uint16_t **)supported_options, no_supported_options));
+	res = tlv_iter_decode_u16_array(tlv_iter, &u16a, no_supported_options);
+	if (res != 0) {
+		return (res);
+	}
+
+	tlv_opt_array = malloc(sizeof(enum tlv_opt_type) * *no_supported_options);
+	if (tlv_opt_array == NULL) {
+		free(u16a);
+		return (-2);
+	}
+
+	for (i = 0; i < *no_supported_options; i++) {
+		tlv_opt_array[i] = (enum tlv_opt_type)u16a[i];
+	}
+
+	free(u16a);
+
+	*supported_options = tlv_opt_array;
+
+	return (0);
 }
 
 int

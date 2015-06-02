@@ -181,6 +181,66 @@ qnetd_client_msg_received_starttls(struct qnetd_instance *instance, struct qnetd
 }
 
 int
+qnetd_client_msg_received_server_error(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg)
+{
+	qnetd_log(LOG_ERR, "Received server error. Sending back error message");
+
+	if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+	    TLV_REPLY_ERROR_CODE_UNEXPECTED_MESSAGE) != 0) {
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+qnetd_client_msg_received_init(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg)
+{
+
+	if (msg->supported_messages != NULL) {
+		/*
+		 * Client sent supported messages. For now this is ignored but in the future
+		 * this may be used to ensure backward compatibility.
+		 */
+/*
+		for (i = 0; i < msg->no_supported_messages; i++) {
+			qnetd_log(LOG_DEBUG, "Client supports %u message", (int)msg->supported_messages[i]);
+		}
+*/
+	}
+
+	if (msg->supported_options != NULL) {
+		/*
+		 * Client sent supported options. For now this is ignored but in the future
+		 * this may be used to ensure backward compatibility.
+		 */
+/*
+		for (i = 0; i < msg->no_supported_options; i++) {
+			qnetd_log(LOG_DEBUG, "Client supports %u option", (int)msg->supported_messages[i]);
+		}
+*/
+	}
+
+	return (0);
+}
+
+int
+qnetd_client_msg_received_init_reply(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg)
+{
+	qnetd_log(LOG_ERR, "Received init reply. Sending back error message");
+
+	if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+	    TLV_REPLY_ERROR_CODE_UNEXPECTED_MESSAGE) != 0) {
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
 qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *client)
 {
 	struct msg_decoded msg;
@@ -216,6 +276,15 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 		break;
 	case MSG_TYPE_STARTTLS:
 		ret_val = qnetd_client_msg_received_starttls(instance, client, &msg);
+		break;
+	case MSG_TYPE_INIT:
+		ret_val = qnetd_client_msg_received_init(instance, client, &msg);
+		break;
+	case MSG_TYPE_INIT_REPLY:
+		ret_val = qnetd_client_msg_received_init_reply(instance, client, &msg);
+		break;
+	case MSG_TYPE_SERVER_ERROR:
+		ret_val = qnetd_client_msg_received_server_error(instance, client, &msg);
 		break;
 	default:
 		qnetd_log(LOG_ERR, "Unsupported message %u received from client. Sending back error message",
@@ -533,9 +602,15 @@ int
 qnetd_instance_destroy(struct qnetd_instance *instance)
 {
 	struct qnetd_client *client;
+	struct qnetd_client *client_next;
 
-	TAILQ_FOREACH(client, &instance->clients, entries) {
+	client = TAILQ_FIRST(&instance->clients);
+	while (client != NULL) {
+		client_next = TAILQ_NEXT(client, entries);
+
 		qnetd_client_disconnect(instance, client);
+
+		client = client_next;
 	}
 
 	qnetd_poll_array_destroy(&instance->poll_array);

@@ -10,13 +10,15 @@
 #define MSG_TYPE_LENGTH		2
 #define MSG_LENGTH_LENGTH	4
 
-#define MSG_STATIC_SUPPORTED_MESSAGES_SIZE	4
+#define MSG_STATIC_SUPPORTED_MESSAGES_SIZE	6
 
 enum msg_type msg_static_supported_messages[MSG_STATIC_SUPPORTED_MESSAGES_SIZE] = {
     MSG_TYPE_PREINIT,
     MSG_TYPE_PREINIT_REPLY,
     MSG_TYPE_STARTTLS,
     MSG_TYPE_INIT,
+    MSG_TYPE_INIT_REPLY,
+    MSG_TYPE_SERVER_ERROR,
 };
 
 size_t
@@ -191,11 +193,33 @@ small_buf_err:
 	return (0);
 }
 
+static uint16_t *
+msg_convert_msg_type_array_to_u16_array(const enum msg_type *msg_type_array, size_t array_size)
+{
+	uint16_t *u16a;
+	size_t i;
+
+	u16a = malloc(sizeof(*u16a) * array_size);
+	if (u16a == NULL) {
+		return (NULL);
+	}
+
+	for (i = 0; i < array_size; i++) {
+		u16a[i] = (uint16_t)msg_type_array[i];
+	}
+
+	return (u16a);
+}
+
 size_t
 msg_create_init(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
     const enum msg_type *supported_msgs, size_t no_supported_msgs,
     const enum tlv_opt_type *supported_opts, size_t no_supported_opts)
 {
+	uint16_t *u16a;
+	int res;
+
+	u16a = NULL;
 
 	dynar_clean(msg);
 
@@ -209,8 +233,17 @@ msg_create_init(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_numb
 	}
 
 	if (supported_msgs != NULL && no_supported_msgs > 0) {
-		if (tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_MESSAGES,
-		    (uint16_t *)supported_msgs, no_supported_msgs) == -1) {
+		u16a = msg_convert_msg_type_array_to_u16_array(supported_msgs, no_supported_msgs);
+
+		if (u16a == NULL) {
+			goto small_buf_err;
+		}
+
+		res = tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_MESSAGES, u16a, no_supported_msgs);
+
+		free(u16a);
+
+		if (res == -1) {
 			goto small_buf_err;
 		}
 	}
@@ -233,24 +266,17 @@ int
 msg_is_valid_msg_type(const struct dynar *msg)
 {
 	enum msg_type type;
-	int res;
+	size_t i;
 
-	res = 0;
 	type = msg_get_type(msg);
 
-	switch (type) {
-	case MSG_TYPE_PREINIT:
-	case MSG_TYPE_PREINIT_REPLY:
-	case MSG_TYPE_STARTTLS:
-	case MSG_TYPE_SERVER_ERROR:
-		res = 1;
-		break;
-	default:
-		res = 0;
-		break;
+	for (i = 0; i < MSG_STATIC_SUPPORTED_MESSAGES_SIZE; i++) {
+		if (msg_static_supported_messages[i] == type) {
+			return (1);
+		}
 	}
 
-	return (res);
+	return (0);
 }
 
 void
@@ -282,6 +308,8 @@ int
 msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 {
 	struct tlv_iterator tlv_iter;
+	uint16_t *u16a;
+	size_t zi;
 	enum tlv_opt_type opt_type;
 	int iter_res;
 	int res;
@@ -326,10 +354,22 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 		case TLV_OPT_SUPPORTED_MESSAGES:
 			free(decoded_msg->supported_messages);
 
-			if ((res = tlv_iter_decode_u16_array(&tlv_iter, (uint16_t **)&decoded_msg->supported_messages,
+			if ((res = tlv_iter_decode_u16_array(&tlv_iter, &u16a,
 			    &decoded_msg->no_supported_messages)) != 0) {
 				return (res);
 			}
+
+			decoded_msg->supported_messages = malloc(sizeof(enum msg_type) * decoded_msg->no_supported_messages);
+			if (decoded_msg->supported_messages == NULL) {
+				free(u16a);
+				return (-2);
+			}
+
+			for (zi = 0; zi < decoded_msg->no_supported_messages; zi++) {
+				decoded_msg->supported_messages[zi] = (enum msg_type)u16a[zi];
+			}
+
+			free(u16a);
 			break;
 		case TLV_OPT_SUPPORTED_OPTIONS:
 			free(decoded_msg->supported_options);
