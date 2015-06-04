@@ -18,6 +18,8 @@ enum tlv_opt_type {
 	TLV_OPT_SUPPORTED_MESSAGES = 4,
 	TLV_OPT_SUPPORTED_OPTIONS = 5,
 	TLV_OPT_REPLY_ERROR_CODE = 6,
+	TLV_OPT_SERVER_MAXIMUM_REQUEST_SIZE = 7,
+	TLV_OPT_SERVER_MAXIMUM_REPLY_SIZE = 8,
 };
 
 enum tlv_tls_supported {
@@ -72,6 +74,12 @@ extern int			 tlv_add_tls_supported(struct dynar *msg, enum tlv_tls_supported tl
 extern int			 tlv_add_tls_client_cert_required(struct dynar *msg, int tls_client_cert_required);
 
 extern int			 tlv_add_reply_error_code(struct dynar *msg, enum tlv_reply_error_code error_code);
+
+extern int			 tlv_add_server_maximum_request_size(struct dynar *msg,
+    size_t server_maximum_request_size);
+
+extern int			 tlv_add_server_maximum_reply_size(struct dynar *msg,
+    size_t server_maximum_reply_size);
 
 extern void			 tlv_iter_init(const struct dynar *msg, size_t msg_header_len,
     struct tlv_iterator *tlv_iter);

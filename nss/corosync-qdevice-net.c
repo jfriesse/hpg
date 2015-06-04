@@ -30,8 +30,14 @@
 
 #define QDEVICE_NET_CLUSTER_NAME		"Testcluster"
 
-#define QDEVICE_NET_MAX_MSG_RECEIVE_SIZE	(1 << 15)
-#define QDEVICE_NET_MAX_MSG_SEND_SIZE		(1 << 15)
+#define QDEVICE_NET_INITIAL_MSG_RECEIVE_SIZE	(1 << 15)
+#define QDEVICE_NET_INITIAL_MSG_SEND_SIZE	(1 << 15)
+
+#define QDEVICE_NET_MIN_MSG_RECEIVE_SIZE	QDEVICE_NET_INITIAL_MSG_RECEIVE_SIZE
+#define QDEVICE_NET_MIN_MSG_SEND_SIZE		QDEVICE_NET_INITIAL_MSG_SEND_SIZE
+
+#define QDEVICE_NET_MAX_MSG_RECEIVE_SIZE	(1 << 24)
+#define QDEVICE_NET_MAX_MSG_SEND_SIZE		(1 << 24)
 
 #define QDEVICE_NET_TLS_SUPPORTED	TLV_TLS_SUPPORTED
 
@@ -52,8 +58,12 @@ enum qdevice_net_state {
 
 struct qdevice_net_instance {
 	PRFileDesc *socket;
+	size_t initial_send_size;
+	size_t initial_receive_size;
 	size_t max_send_size;
 	size_t max_receive_size;
+	size_t min_send_size;
+	size_t min_receive_size;
 	struct dynar receive_buffer;
 	struct dynar send_buffer;
 	int sending_msg;
@@ -284,6 +294,58 @@ qdevice_net_msg_received_preinit_reply(struct qdevice_net_instance *instance, co
 }
 
 int
+qdevice_net_msg_received_init_reply(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+
+	if (instance->state != QDEVICE_NET_STATE_WAITING_INIT_REPLY) {
+		qdevice_net_log(LOG_ERR, "Received unexpected init reply message. Disconnecting from server");
+
+		return (-1);
+	}
+
+	if (qdevice_net_msg_check_seq_number(instance, msg) != 0) {
+		return (-1);
+	}
+
+	if (!msg->server_maximum_request_size_set || !msg->server_maximum_reply_size_set) {
+		qdevice_net_log(LOG_ERR, "Required maximum_request_size or maximum_reply_size option is unset");
+
+		return (-1);
+	}
+
+	if (msg->supported_messages == NULL || msg->supported_options == NULL) {
+		qdevice_net_log(LOG_ERR, "Required supported messages or supported options option is unset");
+
+		return (-1);
+	}
+
+	if (msg->server_maximum_request_size < instance->min_send_size) {
+		qdevice_net_log(LOG_ERR,
+		    "Server accepts maximum %zu bytes message but this client minimum is %zu bytes.",
+		    msg->server_maximum_request_size, instance->min_send_size);
+
+		return (-1);
+	}
+
+	/*
+	 * TODO: makes min and make sense for all combinations?????
+	 */
+	/*if (msg->server_maximum_request_size > instance->min_send_size) {
+		qdevice_net_log(LOG_ERR, "Server accepts maximum %zu bytes message but this client minimum is %zu bytes.");
+
+		return (-1);
+	}*/
+	/*
+	 * Change size
+	 */
+	fprintf(stderr, "%zu %zu\n", msg->server_maximum_request_size, msg->server_maximum_reply_size);
+
+	instance->expected_msg_seq_num++;
+
+	return (0);
+}
+
+int
 qdevice_net_msg_received_stattls(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
 {
 
@@ -340,6 +402,9 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 		break;
 	case MSG_TYPE_SERVER_ERROR:
 		ret_val = qdevice_net_msg_received_server_error(instance, &msg);
+		break;
+	case MSG_TYPE_INIT_REPLY:
+		ret_val = qdevice_net_msg_received_init_reply(instance, &msg);
 		break;
 	default:
 		qdevice_net_log(LOG_ERR, "Received unsupported message %u. Disconnecting from server", msg.type);
@@ -566,16 +631,23 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 }
 
 int
-qdevice_net_instance_init(struct qdevice_net_instance *instance, size_t max_receive_size,
-    size_t max_send_size, enum tlv_tls_supported tls_supported)
+qdevice_net_instance_init(struct qdevice_net_instance *instance,
+    size_t initial_receive_size, size_t initial_send_size,
+    size_t min_receive_size, size_t min_send_size,
+    size_t max_receive_size, size_t max_send_size,
+    enum tlv_tls_supported tls_supported)
 {
 
 	memset(instance, 0, sizeof(*instance));
 
+	instance->initial_receive_size = initial_receive_size;
+	instance->initial_send_size = initial_send_size;
+	instance->min_receive_size = min_receive_size;
+	instance->min_send_size = min_send_size;
 	instance->max_receive_size = max_receive_size;
 	instance->max_send_size = max_send_size;
-	dynar_init(&instance->receive_buffer, max_receive_size);
-	dynar_init(&instance->send_buffer, max_send_size);
+	dynar_init(&instance->receive_buffer, initial_receive_size);
+	dynar_init(&instance->send_buffer, initial_send_size);
 
 	instance->tls_supported = tls_supported;
 
@@ -607,8 +679,11 @@ main(void)
 		err_nss();
 	}
 
-	if (qdevice_net_instance_init(&instance, QDEVICE_NET_MAX_MSG_RECEIVE_SIZE,
-	    QDEVICE_NET_MAX_MSG_SEND_SIZE, QDEVICE_NET_TLS_SUPPORTED) == -1) {
+	if (qdevice_net_instance_init(&instance,
+	    QDEVICE_NET_INITIAL_MSG_RECEIVE_SIZE, QDEVICE_NET_INITIAL_MSG_SEND_SIZE,
+	    QDEVICE_NET_MIN_MSG_RECEIVE_SIZE, QDEVICE_NET_MIN_MSG_SEND_SIZE,
+	    QDEVICE_NET_MAX_MSG_RECEIVE_SIZE, QDEVICE_NET_MAX_MSG_SEND_SIZE,
+	    QDEVICE_NET_TLS_SUPPORTED) == -1) {
 		errx(1, "Can't initialize qdevice-net");
 	}
 

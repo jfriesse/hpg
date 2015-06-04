@@ -262,6 +262,66 @@ small_buf_err:
 	return (0);
 }
 
+size_t
+msg_create_init_reply(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
+    const enum msg_type *supported_msgs, size_t no_supported_msgs,
+    const enum tlv_opt_type *supported_opts, size_t no_supported_opts,
+    size_t server_maximum_request_size, size_t server_maximum_reply_size)
+{
+	uint16_t *u16a;
+	int res;
+
+	u16a = NULL;
+
+	dynar_clean(msg);
+
+	msg_add_type(msg, MSG_TYPE_INIT_REPLY);
+	msg_add_len(msg);
+
+	if (supported_msgs != NULL && no_supported_msgs > 0) {
+		u16a = msg_convert_msg_type_array_to_u16_array(supported_msgs, no_supported_msgs);
+
+		if (u16a == NULL) {
+			goto small_buf_err;
+		}
+
+		res = tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_MESSAGES, u16a, no_supported_msgs);
+
+		free(u16a);
+
+		if (res == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (supported_opts != NULL && no_supported_opts > 0) {
+		if (tlv_add_supported_options(msg, supported_opts, no_supported_opts) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (add_msg_seq_number) {
+		if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (tlv_add_server_maximum_request_size(msg, server_maximum_request_size) == -1) {
+		goto small_buf_err;
+	}
+
+	if (tlv_add_server_maximum_reply_size(msg, server_maximum_reply_size) == -1) {
+		goto small_buf_err;
+	}
+
+	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
+
+	return (dynar_size(msg));
+
+small_buf_err:
+	return (0);
+}
+
 int
 msg_is_valid_msg_type(const struct dynar *msg)
 {
@@ -309,6 +369,7 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 {
 	struct tlv_iterator tlv_iter;
 	uint16_t *u16a;
+	uint32_t u32;
 	size_t zi;
 	enum tlv_opt_type opt_type;
 	int iter_res;
@@ -385,6 +446,22 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 			}
 
 			decoded_msg->reply_error_code_set = 1;
+			break;
+		case TLV_OPT_SERVER_MAXIMUM_REQUEST_SIZE:
+			if (tlv_iter_decode_u32(&tlv_iter, &u32) != 0) {
+				return (-1);
+			}
+
+			decoded_msg->server_maximum_request_size_set = 1;
+			decoded_msg->server_maximum_request_size = u32;
+			break;
+		case TLV_OPT_SERVER_MAXIMUM_REPLY_SIZE:
+			if (tlv_iter_decode_u32(&tlv_iter, &u32) != 0) {
+				return (-1);
+			}
+
+			decoded_msg->server_maximum_reply_size_set = 1;
+			decoded_msg->server_maximum_reply_size = u32;
 			break;
 		default:
 			/*

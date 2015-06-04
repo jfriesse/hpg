@@ -160,6 +160,20 @@ tlv_add_reply_error_code(struct dynar *msg, enum tlv_reply_error_code error_code
 	return (tlv_add_u16(msg, TLV_OPT_REPLY_ERROR_CODE, (uint16_t)error_code));
 }
 
+int
+tlv_add_server_maximum_request_size(struct dynar *msg, size_t server_maximum_request_size)
+{
+
+	return (tlv_add_u32(msg, TLV_OPT_SERVER_MAXIMUM_REQUEST_SIZE, server_maximum_request_size));
+}
+
+int
+tlv_add_server_maximum_reply_size(struct dynar *msg, size_t server_maximum_reply_size)
+{
+
+	return (tlv_add_u32(msg, TLV_OPT_SERVER_MAXIMUM_REPLY_SIZE, server_maximum_reply_size));
+}
+
 void
 tlv_iter_init(const struct dynar *msg, size_t msg_header_len, struct tlv_iterator *tlv_iter)
 {

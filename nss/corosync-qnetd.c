@@ -314,6 +314,15 @@ qnetd_client_msg_received_init(struct qnetd_instance *instance, struct qnetd_cli
 	const struct msg_decoded *msg)
 {
 	int res;
+	enum msg_type *supported_msgs;
+	size_t no_supported_msgs;
+	enum tlv_opt_type *supported_opts;
+	size_t no_supported_opts;
+
+	supported_msgs = NULL;
+	supported_opts = NULL;
+	no_supported_msgs = 0;
+	no_supported_opts = 0;
 
 	if ((res = qnetd_client_check_tls(instance, client, msg)) != 0) {
 		return (res == -1 ? -1 : 0);
@@ -340,6 +349,11 @@ qnetd_client_msg_received_init(struct qnetd_instance *instance, struct qnetd_cli
 			qnetd_log(LOG_DEBUG, "Client supports %u message", (int)msg->supported_messages[i]);
 		}
 */
+
+		/*
+		 * Sent back supported messages
+		 */
+		msg_get_supported_messages(&supported_msgs, &no_supported_msgs);
 	}
 
 	if (msg->supported_options != NULL) {
@@ -352,6 +366,25 @@ qnetd_client_msg_received_init(struct qnetd_instance *instance, struct qnetd_cli
 			qnetd_log(LOG_DEBUG, "Client supports %u option", (int)msg->supported_messages[i]);
 		}
 */
+
+		/*
+		 * Send back supported options
+		 */
+		tlv_get_supported_options(&supported_opts, &no_supported_opts);
+	}
+
+	if (msg_create_init_reply(&client->send_buffer, msg->seq_number_set, msg->seq_number,
+	    supported_msgs, no_supported_msgs, supported_opts, no_supported_opts,
+	    instance->max_client_receive_size, instance->max_client_send_size) == -1) {
+		qnetd_log(LOG_ERR, "Can't alloc init reply msg. Disconnecting client connection.");
+
+		return (-1);
+	}
+
+	if (qnetd_client_net_schedule_send(client) != 0) {
+		qnetd_log(LOG_ERR, "Can't schedule send of init reply message. Disconnecting client connection.");
+
+		return (-1);
 	}
 
 	return (0);
