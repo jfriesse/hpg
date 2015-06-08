@@ -29,6 +29,8 @@ struct qnetd_client {
 	int init_received;
 	char *cluster_name;
 	size_t cluster_name_len;
+	uint8_t node_id_set;
+	uint32_t node_id;
 	enum tlv_reply_error_code skipping_msg_reason;
 	TAILQ_ENTRY(qnetd_client) entries;
 };

@@ -339,6 +339,17 @@ qnetd_client_msg_received_init(struct qnetd_instance *instance, struct qnetd_cli
 		return (0);
 	}
 
+	if (!msg->node_id_set) {
+		qnetd_log(LOG_ERR, "Received init message without node id set. Sending error reply.");
+
+		if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+		    TLV_REPLY_ERROR_CODE_DOESNT_CONTAIN_REQUIRED_OPTION) != 0) {
+			return (-1);
+		}
+
+		return (0);
+	}
+
 	if (msg->supported_messages != NULL) {
 		/*
 		 * Client sent supported messages. For now this is ignored but in the future
@@ -372,6 +383,9 @@ qnetd_client_msg_received_init(struct qnetd_instance *instance, struct qnetd_cli
 		 */
 		tlv_get_supported_options(&supported_opts, &no_supported_opts);
 	}
+
+	client->node_id_set = 1;
+	client->node_id = msg->node_id;
 
 	if (msg_create_init_reply(&client->send_buffer, msg->seq_number_set, msg->seq_number,
 	    supported_msgs, no_supported_msgs, supported_opts, no_supported_opts,

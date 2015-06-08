@@ -39,6 +39,8 @@
 
 #define QDEVICE_NET_TLS_SUPPORTED	TLV_TLS_SUPPORTED
 
+#define QDEVICE_NET_NODE_ID		42
+
 #define qdevice_net_log			qnetd_log
 #define qdevice_net_log_nss		qnetd_log_nss
 #define qdevice_net_log_init		qnetd_log_init
@@ -70,6 +72,7 @@ struct qdevice_net_instance {
 	uint32_t expected_msg_seq_num;
 	enum tlv_tls_supported tls_supported;
 	int using_tls;
+	uint32_t node_id;
 };
 
 static void
@@ -214,7 +217,8 @@ qdevice_net_send_init(struct qdevice_net_instance *instance)
 	instance->expected_msg_seq_num++;
 
 	if (msg_create_init(&instance->send_buffer, 1, instance->expected_msg_seq_num,
-	    supported_msgs, no_supported_msgs, supported_opts, no_supported_opts) == 0) {
+	    supported_msgs, no_supported_msgs, supported_opts, no_supported_opts,
+	    instance->node_id) == 0) {
 		qdevice_net_log(LOG_ERR, "Can't allocate send buffer for init msg");
 
 		return (-1);
@@ -632,7 +636,8 @@ int
 qdevice_net_instance_init(struct qdevice_net_instance *instance,
     size_t initial_receive_size, size_t initial_send_size,
     size_t min_send_size, size_t max_receive_size,
-    enum tlv_tls_supported tls_supported)
+    enum tlv_tls_supported tls_supported,
+    uint32_t node_id)
 {
 
 	memset(instance, 0, sizeof(*instance));
@@ -641,6 +646,7 @@ qdevice_net_instance_init(struct qdevice_net_instance *instance,
 	instance->initial_send_size = initial_send_size;
 	instance->min_send_size = min_send_size;
 	instance->max_receive_size = max_receive_size;
+	instance->node_id = node_id;
 	dynar_init(&instance->receive_buffer, initial_receive_size);
 	dynar_init(&instance->send_buffer, initial_send_size);
 
@@ -677,7 +683,7 @@ main(void)
 	if (qdevice_net_instance_init(&instance,
 	    QDEVICE_NET_INITIAL_MSG_RECEIVE_SIZE, QDEVICE_NET_INITIAL_MSG_SEND_SIZE,
 	    QDEVICE_NET_MIN_MSG_SEND_SIZE, QDEVICE_NET_MAX_MSG_RECEIVE_SIZE,
-	    QDEVICE_NET_TLS_SUPPORTED) == -1) {
+	    QDEVICE_NET_TLS_SUPPORTED, QDEVICE_NET_NODE_ID) == -1) {
 		errx(1, "Can't initialize qdevice-net");
 	}
 

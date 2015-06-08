@@ -174,6 +174,13 @@ tlv_add_server_maximum_reply_size(struct dynar *msg, size_t server_maximum_reply
 	return (tlv_add_u32(msg, TLV_OPT_SERVER_MAXIMUM_REPLY_SIZE, server_maximum_reply_size));
 }
 
+int
+tlv_add_node_id(struct dynar *msg, uint32_t node_id)
+{
+
+	return (tlv_add_u32(msg, TLV_OPT_NODE_ID, node_id));
+}
+
 void
 tlv_iter_init(const struct dynar *msg, size_t msg_header_len, struct tlv_iterator *tlv_iter)
 {

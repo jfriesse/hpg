@@ -214,7 +214,7 @@ msg_convert_msg_type_array_to_u16_array(const enum msg_type *msg_type_array, siz
 size_t
 msg_create_init(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
     const enum msg_type *supported_msgs, size_t no_supported_msgs,
-    const enum tlv_opt_type *supported_opts, size_t no_supported_opts)
+    const enum tlv_opt_type *supported_opts, size_t no_supported_opts, uint32_t node_id)
 {
 	uint16_t *u16a;
 	int res;
@@ -253,6 +253,10 @@ msg_create_init(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_numb
 			goto small_buf_err;
 		}
 	}
+
+        if (tlv_add_node_id(msg, node_id) == -1) {
+		goto small_buf_err;
+        }
 
 	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
 
@@ -462,6 +466,14 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 
 			decoded_msg->server_maximum_reply_size_set = 1;
 			decoded_msg->server_maximum_reply_size = u32;
+			break;
+		case TLV_OPT_NODE_ID:
+			if (tlv_iter_decode_u32(&tlv_iter, &u32) != 0) {
+				return (-1);
+			}
+
+			decoded_msg->node_id_set = 1;
+			decoded_msg->node_id = u32;
 			break;
 		default:
 			/*

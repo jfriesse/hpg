@@ -40,6 +40,8 @@ struct msg_decoded {
 	size_t server_maximum_request_size;		// Valid only if server_maximum_request_size_set != 0
 	uint8_t server_maximum_reply_size_set;
 	size_t server_maximum_reply_size;		// Valid only if server_maximum_reply_size_set != 0
+	uint8_t node_id_set;
+	uint32_t node_id;
 };
 
 extern size_t		msg_create_preinit(struct dynar *msg, const char *cluster_name,
@@ -53,7 +55,7 @@ extern size_t		msg_create_starttls(struct dynar *msg, int add_msg_seq_number,
 
 extern size_t		msg_create_init(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
     const enum msg_type *supported_msgs, size_t no_supported_msgs,
-    const enum tlv_opt_type *supported_opts, size_t no_supported_opts);
+    const enum tlv_opt_type *supported_opts, size_t no_supported_opts, uint32_t node_id);
 
 extern size_t		msg_create_server_error(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
     enum tlv_reply_error_code reply_error_code);
