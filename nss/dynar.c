@@ -14,6 +14,13 @@ dynar_init(struct dynar *array, size_t maximum_size)
 }
 
 void
+dynar_set_max_size(struct dynar *array, size_t maximum_size)
+{
+
+	array->maximum_size = maximum_size;
+}
+
+void
 dynar_destroy(struct dynar *array)
 {
 

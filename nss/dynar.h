@@ -28,6 +28,8 @@ extern size_t	 dynar_size(const struct dynar *array);
 
 extern size_t	 dynar_max_size(const struct dynar *array);
 
+extern void	 dynar_set_max_size(struct dynar *array, size_t maximum_size);
+
 extern char	*dynar_data(const struct dynar *array);
 
 extern int	 dynar_cat(struct dynar *array, const void *src, size_t size);
