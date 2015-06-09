@@ -270,7 +270,8 @@ size_t
 msg_create_init_reply(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
     const enum msg_type *supported_msgs, size_t no_supported_msgs,
     const enum tlv_opt_type *supported_opts, size_t no_supported_opts,
-    size_t server_maximum_request_size, size_t server_maximum_reply_size)
+    size_t server_maximum_request_size, size_t server_maximum_reply_size,
+    const enum tlv_decision_algorithm_type *supported_decision_algorithms, size_t no_supported_decision_algorithms)
 {
 	uint16_t *u16a;
 	int res;
@@ -316,6 +317,13 @@ msg_create_init_reply(struct dynar *msg, int add_msg_seq_number, uint32_t msg_se
 
 	if (tlv_add_server_maximum_reply_size(msg, server_maximum_reply_size) == -1) {
 		goto small_buf_err;
+	}
+
+	if (supported_decision_algorithms != NULL && no_supported_decision_algorithms > 0) {
+		if (tlv_add_supported_decision_algorithms(msg, supported_decision_algorithms,
+		    no_supported_decision_algorithms) == -1) {
+			goto small_buf_err;
+		}
 	}
 
 	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
@@ -474,6 +482,15 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 
 			decoded_msg->node_id_set = 1;
 			decoded_msg->node_id = u32;
+			break;
+		case TLV_OPT_SUPPORTED_DECISION_ALGORITHMS:
+			free(decoded_msg->supported_decision_algorithms);
+
+			if ((res = tlv_iter_decode_supported_decision_algorithms(&tlv_iter,
+			    &decoded_msg->supported_decision_algorithms,
+			    &decoded_msg->no_supported_decision_algorithms)) != 0) {
+				return (res);
+			}
 			break;
 		default:
 			/*

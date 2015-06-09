@@ -55,9 +55,19 @@ struct qnetd_instance {
  */
 PRFileDesc *global_server_socket;
 
+/*
+ * Decision algorithms supported in this server
+ */
+#define QNETD_STATIC_SUPPORTED_DECISION_ALGORITHMS_SIZE		1
+
+enum tlv_decision_algorithm_type
+    qnetd_static_supported_decision_algorithms[QNETD_STATIC_SUPPORTED_DECISION_ALGORITHMS_SIZE] = {
+	TLV_DECISION_ALGORITHM_TYPE_TEST,
+};
 
 static void
 qnetd_err_nss(void) {
+
 	qnetd_log_nss(LOG_CRIT, "NSS error");
 
 	exit(1);
@@ -65,6 +75,7 @@ qnetd_err_nss(void) {
 
 static void
 qnetd_warn_nss(void) {
+
 	qnetd_log_nss(LOG_WARNING, "NSS warning");
 }
 
@@ -389,7 +400,8 @@ qnetd_client_msg_received_init(struct qnetd_instance *instance, struct qnetd_cli
 
 	if (msg_create_init_reply(&client->send_buffer, msg->seq_number_set, msg->seq_number,
 	    supported_msgs, no_supported_msgs, supported_opts, no_supported_opts,
-	    instance->max_client_receive_size, instance->max_client_send_size) == -1) {
+	    instance->max_client_receive_size, instance->max_client_send_size,
+	    qnetd_static_supported_decision_algorithms, QNETD_STATIC_SUPPORTED_DECISION_ALGORITHMS_SIZE) == -1) {
 		qnetd_log(LOG_ERR, "Can't alloc init reply msg. Disconnecting client connection.");
 
 		return (-1);

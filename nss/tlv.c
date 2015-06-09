@@ -10,7 +10,7 @@
 #define TLV_TYPE_LENGTH		2
 #define TLV_LENGTH_LENGTH	2
 
-#define TLV_STATIC_SUPPORTED_OPTIONS_SIZE      6
+#define TLV_STATIC_SUPPORTED_OPTIONS_SIZE      11
 
 enum tlv_opt_type tlv_static_supported_options[TLV_STATIC_SUPPORTED_OPTIONS_SIZE] = {
     TLV_OPT_MSG_SEQ_NUMBER,
@@ -19,6 +19,11 @@ enum tlv_opt_type tlv_static_supported_options[TLV_STATIC_SUPPORTED_OPTIONS_SIZE
     TLV_OPT_TLS_CLIENT_CERT_REQUIRED,
     TLV_OPT_SUPPORTED_MESSAGES,
     TLV_OPT_SUPPORTED_OPTIONS,
+    TLV_OPT_REPLY_ERROR_CODE,
+    TLV_OPT_SERVER_MAXIMUM_REQUEST_SIZE,
+    TLV_OPT_SERVER_MAXIMUM_REPLY_SIZE,
+    TLV_OPT_NODE_ID,
+    TLV_OPT_SUPPORTED_DECISION_ALGORITHMS,
 };
 
 int
@@ -147,6 +152,30 @@ tlv_add_supported_options(struct dynar *msg, const enum tlv_opt_type *supported_
 	}
 
 	res = (tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_OPTIONS, u16a, no_supported_options));
+
+	free(u16a);
+
+	return (res);
+}
+
+int
+tlv_add_supported_decision_algorithms(struct dynar *msg, const enum tlv_decision_algorithm_type *supported_algorithms,
+    size_t no_supported_algorithms)
+{
+	uint16_t *u16a;
+	size_t i;
+	int res;
+
+	u16a = malloc(sizeof(*u16a) * no_supported_algorithms);
+	if (u16a == NULL) {
+		return (-1);
+	}
+
+	for (i = 0; i < no_supported_algorithms; i++) {
+		u16a[i] = (uint16_t)supported_algorithms[i];
+	}
+
+	res = (tlv_add_u16_array(msg, TLV_OPT_SUPPORTED_DECISION_ALGORITHMS, u16a, no_supported_algorithms));
 
 	free(u16a);
 
@@ -380,6 +409,39 @@ tlv_iter_decode_supported_options(struct tlv_iterator *tlv_iter, enum tlv_opt_ty
 	free(u16a);
 
 	*supported_options = tlv_opt_array;
+
+	return (0);
+}
+
+int
+tlv_iter_decode_supported_decision_algorithms(struct tlv_iterator *tlv_iter,
+    enum tlv_decision_algorithm_type **supported_decision_algorithms, size_t *no_supported_decision_algorithms)
+{
+	uint16_t *u16a;
+	enum tlv_decision_algorithm_type *tlv_decision_algorithm_type_array;
+	size_t i;
+	int res;
+
+	res = tlv_iter_decode_u16_array(tlv_iter, &u16a, no_supported_decision_algorithms);
+	if (res != 0) {
+		return (res);
+	}
+
+	tlv_decision_algorithm_type_array = malloc(
+	    sizeof(enum tlv_decision_algorithm_type) * *no_supported_decision_algorithms);
+
+	if (tlv_decision_algorithm_type_array == NULL) {
+		free(u16a);
+		return (-2);
+	}
+
+	for (i = 0; i < *no_supported_decision_algorithms; i++) {
+		tlv_decision_algorithm_type_array[i] = (enum tlv_decision_algorithm_type)u16a[i];
+	}
+
+	free(u16a);
+
+	*supported_decision_algorithms = tlv_decision_algorithm_type_array;
 
 	return (0);
 }

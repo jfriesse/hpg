@@ -21,6 +21,7 @@ enum tlv_opt_type {
 	TLV_OPT_SERVER_MAXIMUM_REQUEST_SIZE = 7,
 	TLV_OPT_SERVER_MAXIMUM_REPLY_SIZE = 8,
 	TLV_OPT_NODE_ID = 9,
+	TLV_OPT_SUPPORTED_DECISION_ALGORITHMS = 10,
 };
 
 enum tlv_tls_supported {
@@ -41,6 +42,10 @@ enum tlv_reply_error_code {
 	TLV_REPLY_ERROR_CODE_UNEXPECTED_MESSAGE = 8,
 	TLV_REPLY_ERROR_CODE_ERROR_DECODING_MSG = 9,
 	TLV_REPLY_ERROR_CODE_INTERNAL_ERROR = 10,
+};
+
+enum tlv_decision_algorithm_type {
+	TLV_DECISION_ALGORITHM_TYPE_TEST = 0,
 };
 
 struct tlv_iterator {
@@ -84,6 +89,9 @@ extern int			 tlv_add_server_maximum_request_size(struct dynar *msg,
 extern int			 tlv_add_server_maximum_reply_size(struct dynar *msg,
     size_t server_maximum_reply_size);
 
+extern int			 tlv_add_supported_decision_algorithms(struct dynar *msg,
+    const enum tlv_decision_algorithm_type *supported_algorithms, size_t no_supported_algorithms);
+
 extern void			 tlv_iter_init(const struct dynar *msg, size_t msg_header_len,
     struct tlv_iterator *tlv_iter);
 
@@ -112,6 +120,9 @@ extern int			 tlv_iter_decode_u16_array(struct tlv_iterator *tlv_iter,
 
 extern int			 tlv_iter_decode_supported_options(struct tlv_iterator *tlv_iter,
     enum tlv_opt_type **supported_options, size_t *no_supported_options);
+
+extern int			 tlv_iter_decode_supported_decision_algorithms(struct tlv_iterator *tlv_iter,
+    enum tlv_decision_algorithm_type **supported_decision_algorithms, size_t *no_supported_decision_algorithms);
 
 extern int			 tlv_iter_decode_u16(struct tlv_iterator *tlv_iter, uint16_t *u16);
 

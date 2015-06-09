@@ -41,6 +41,8 @@
 
 #define QDEVICE_NET_NODE_ID		42
 
+#define QDEVICE_NET_DECISION_ALGORITHM		TLV_DECISION_ALGORITHM_TYPE_TEST
+
 #define qdevice_net_log			qnetd_log
 #define qdevice_net_log_nss		qnetd_log_nss
 #define qdevice_net_log_init		qnetd_log_init
@@ -73,6 +75,7 @@ struct qdevice_net_instance {
 	enum tlv_tls_supported tls_supported;
 	int using_tls;
 	uint32_t node_id;
+	enum tlv_decision_algorithm_type decision_algorithm;
 };
 
 static void
@@ -296,6 +299,8 @@ qdevice_net_msg_received_preinit_reply(struct qdevice_net_instance *instance, co
 int
 qdevice_net_msg_received_init_reply(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
 {
+	size_t zi;
+	int res;
 
 	if (instance->state != QDEVICE_NET_STATE_WAITING_INIT_REPLY) {
 		qdevice_net_log(LOG_ERR, "Received unexpected init reply message. Disconnecting from server");
@@ -315,6 +320,12 @@ qdevice_net_msg_received_init_reply(struct qdevice_net_instance *instance, const
 
 	if (msg->supported_messages == NULL || msg->supported_options == NULL) {
 		qdevice_net_log(LOG_ERR, "Required supported messages or supported options option is unset");
+
+		return (-1);
+	}
+
+	if (msg->supported_decision_algorithms == NULL) {
+		qdevice_net_log(LOG_ERR, "Required supported decision algorithms option is unset");
 
 		return (-1);
 	}
@@ -341,6 +352,23 @@ qdevice_net_msg_received_init_reply(struct qdevice_net_instance *instance, const
 	dynar_set_max_size(&instance->receive_buffer, msg->server_maximum_reply_size);
 	dynar_set_max_size(&instance->send_buffer, msg->server_maximum_request_size);
 
+
+	/*
+	 * Check if server supports decision algorithm we need
+	 */
+	res = 0;
+
+	for (zi = 0; zi < msg->no_supported_decision_algorithms && !res; zi++) {
+		if (msg->supported_decision_algorithms[zi] == instance->decision_algorithm) {
+			res = 1;
+		}
+	}
+
+	if (!res) {
+		qdevice_net_log(LOG_ERR, "Server doesn't support required decision algorithm");
+
+		return (-1);
+	}
 
 	instance->expected_msg_seq_num++;
 
@@ -637,7 +665,7 @@ qdevice_net_instance_init(struct qdevice_net_instance *instance,
     size_t initial_receive_size, size_t initial_send_size,
     size_t min_send_size, size_t max_receive_size,
     enum tlv_tls_supported tls_supported,
-    uint32_t node_id)
+    uint32_t node_id, enum tlv_decision_algorithm_type decision_algorithm)
 {
 
 	memset(instance, 0, sizeof(*instance));
@@ -647,6 +675,7 @@ qdevice_net_instance_init(struct qdevice_net_instance *instance,
 	instance->min_send_size = min_send_size;
 	instance->max_receive_size = max_receive_size;
 	instance->node_id = node_id;
+	instance->decision_algorithm = decision_algorithm;
 	dynar_init(&instance->receive_buffer, initial_receive_size);
 	dynar_init(&instance->send_buffer, initial_send_size);
 
@@ -683,7 +712,7 @@ main(void)
 	if (qdevice_net_instance_init(&instance,
 	    QDEVICE_NET_INITIAL_MSG_RECEIVE_SIZE, QDEVICE_NET_INITIAL_MSG_SEND_SIZE,
 	    QDEVICE_NET_MIN_MSG_SEND_SIZE, QDEVICE_NET_MAX_MSG_RECEIVE_SIZE,
-	    QDEVICE_NET_TLS_SUPPORTED, QDEVICE_NET_NODE_ID) == -1) {
+	    QDEVICE_NET_TLS_SUPPORTED, QDEVICE_NET_NODE_ID, QDEVICE_NET_DECISION_ALGORITHM) == -1) {
 		errx(1, "Can't initialize qdevice-net");
 	}
 
