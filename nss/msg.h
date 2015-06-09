@@ -18,6 +18,8 @@ enum msg_type {
 	MSG_TYPE_INIT = 3,
 	MSG_TYPE_INIT_REPLY = 4,
 	MSG_TYPE_SERVER_ERROR = 5,
+	MSG_TYPE_SET_OPTION = 6,
+	MSG_TYPE_SET_OPTION_REPLY = 7,
 };
 
 struct msg_decoded {
@@ -44,6 +46,10 @@ struct msg_decoded {
 	uint32_t node_id;
 	size_t no_supported_decision_algorithms;
 	enum tlv_decision_algorithm_type *supported_decision_algorithms;	// Valid only if != NULL
+	uint8_t decision_algorithm_set;
+	enum tlv_decision_algorithm_type decision_algorithm;		// Valid only if decision_algorithm_set != 0
+	uint8_t heartbeat_interval_set;
+	uint32_t heartbeat_interval;					// Valid only if heartbeat_interval_set != 0
 };
 
 extern size_t		msg_create_preinit(struct dynar *msg, const char *cluster_name,
@@ -67,6 +73,15 @@ extern size_t		msg_create_init_reply(struct dynar *msg, int add_msg_seq_number, 
     const enum tlv_opt_type *supported_opts, size_t no_supported_opts,
     size_t server_maximum_request_size, size_t server_maximum_reply_size,
     const enum tlv_decision_algorithm_type *supported_decision_algorithms, size_t no_supported_decision_algorithms);
+
+extern size_t		msg_create_set_option(struct dynar *msg,
+    int add_msg_seq_number, uint32_t msg_seq_number,
+    int add_decision_algorithm, enum tlv_decision_algorithm_type decision_algorithm,
+    int add_heartbeat_interval, uint32_t heartbeat_interval);
+
+extern size_t		msg_create_set_option_reply(struct dynar *msg,
+    int add_msg_seq_number, uint32_t msg_seq_number,
+    enum tlv_decision_algorithm_type decision_algorithm, uint32_t heartbeat_interval);
 
 extern size_t		msg_get_header_length(void);
 

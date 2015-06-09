@@ -36,6 +36,9 @@
 #define QNETD_TLS_SUPPORTED			TLV_TLS_SUPPORTED
 #define QNETD_TLS_CLIENT_CERT_REQUIRED		1
 
+#define QNETD_HEARTBEAT_INTERVAL_MIN		1000
+#define QNETD_HEARTBEAT_INTERVAL_MAX		200000
+
 struct qnetd_instance {
 	struct {
 		PRFileDesc *socket;
@@ -397,6 +400,7 @@ qnetd_client_msg_received_init(struct qnetd_instance *instance, struct qnetd_cli
 
 	client->node_id_set = 1;
 	client->node_id = msg->node_id;
+	client->init_received = 1;
 
 	if (msg_create_init_reply(&client->send_buffer, msg->seq_number_set, msg->seq_number,
 	    supported_msgs, no_supported_msgs, supported_opts, no_supported_opts,
@@ -424,6 +428,105 @@ qnetd_client_msg_received_init_reply(struct qnetd_instance *instance, struct qne
 
 	if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
 	    TLV_REPLY_ERROR_CODE_UNEXPECTED_MESSAGE) != 0) {
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+qnetd_client_msg_received_set_option_reply(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg)
+{
+	qnetd_log(LOG_ERR, "Received set option reply. Sending back error message");
+
+	if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+	    TLV_REPLY_ERROR_CODE_UNEXPECTED_MESSAGE) != 0) {
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+qnetd_client_msg_received_set_option(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg)
+{
+	int res;
+	size_t zi;
+
+	if ((res = qnetd_client_check_tls(instance, client, msg)) != 0) {
+		return (res == -1 ? -1 : 0);
+	}
+
+	if (!client->init_received) {
+		qnetd_log(LOG_ERR, "Received set option message before init message. Sending error reply.");
+
+		if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+		    TLV_REPLY_ERROR_CODE_INIT_REQUIRED) != 0) {
+			return (-1);
+		}
+
+		return (0);
+	}
+
+	if (msg->decision_algorithm_set) {
+		/*
+		 * Check if decision algorithm requested by client is supported
+		 */
+		res = 0;
+
+		for (zi = 0; zi < QNETD_STATIC_SUPPORTED_DECISION_ALGORITHMS_SIZE && !res; zi++) {
+			if (qnetd_static_supported_decision_algorithms[zi] == msg->decision_algorithm) {
+				res = 1;
+			}
+		}
+
+		if (!res) {
+			qnetd_log(LOG_ERR, "Client requested unsupported decision algorithm %u. Sending error reply.",
+			    msg->decision_algorithm);
+
+			if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+			    TLV_REPLY_ERROR_CODE_UNSUPPORTED_DECISION_ALGORITHM) != 0) {
+				return (-1);
+			}
+
+			return (0);
+		}
+
+		client->decision_algorithm = msg->decision_algorithm;
+	}
+
+	if (msg->heartbeat_interval_set) {
+		/*
+		 * Check if heartbeat interval is valid
+		 */
+		if (msg->heartbeat_interval != 0 && (msg->heartbeat_interval < QNETD_HEARTBEAT_INTERVAL_MIN ||
+		    msg->heartbeat_interval > QNETD_HEARTBEAT_INTERVAL_MAX)) {
+			qnetd_log(LOG_ERR, "Client requested invalid heartbeat interval %u. Sending error reply.",
+			    msg->heartbeat_interval);
+
+			if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+			    TLV_REPLY_ERROR_CODE_INVALID_HEARTBEAT_INTERVAL) != 0) {
+				return (-1);
+			}
+
+			return (0);
+		}
+
+		client->heartbeat_interval = msg->heartbeat_interval;
+	}
+
+	if (msg_create_set_option_reply(&client->send_buffer, msg->seq_number_set, msg->seq_number,
+	    client->decision_algorithm, client->heartbeat_interval) == -1) {
+		qnetd_log(LOG_ERR, "Can't alloc set option reply msg. Disconnecting client connection.");
+
+		return (-1);
+	}
+
+	if (qnetd_client_net_schedule_send(client) != 0) {
+		qnetd_log(LOG_ERR, "Can't schedule send of set option reply message. Disconnecting client connection.");
+
 		return (-1);
 	}
 
@@ -475,6 +578,12 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 		break;
 	case MSG_TYPE_SERVER_ERROR:
 		ret_val = qnetd_client_msg_received_server_error(instance, client, &msg);
+		break;
+	case MSG_TYPE_SET_OPTION:
+		ret_val = qnetd_client_msg_received_set_option(instance, client, &msg);
+		break;
+	case MSG_TYPE_SET_OPTION_REPLY:
+		ret_val = qnetd_client_msg_received_set_option_reply(instance, client, &msg);
 		break;
 	default:
 		qnetd_log(LOG_ERR, "Unsupported message %u received from client. Sending back error message",

@@ -10,7 +10,7 @@
 #define MSG_TYPE_LENGTH		2
 #define MSG_LENGTH_LENGTH	4
 
-#define MSG_STATIC_SUPPORTED_MESSAGES_SIZE	6
+#define MSG_STATIC_SUPPORTED_MESSAGES_SIZE	8
 
 enum msg_type msg_static_supported_messages[MSG_STATIC_SUPPORTED_MESSAGES_SIZE] = {
     MSG_TYPE_PREINIT,
@@ -19,6 +19,8 @@ enum msg_type msg_static_supported_messages[MSG_STATIC_SUPPORTED_MESSAGES_SIZE] 
     MSG_TYPE_INIT,
     MSG_TYPE_INIT_REPLY,
     MSG_TYPE_SERVER_ERROR,
+    MSG_TYPE_SET_OPTION,
+    MSG_TYPE_SET_OPTION_REPLY,
 };
 
 size_t
@@ -334,6 +336,75 @@ small_buf_err:
 	return (0);
 }
 
+size_t
+msg_create_set_option(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
+    int add_decision_algorithm, enum tlv_decision_algorithm_type decision_algorithm,
+    int add_heartbeat_interval, uint32_t heartbeat_interval)
+{
+
+	dynar_clean(msg);
+
+	msg_add_type(msg, MSG_TYPE_SET_OPTION);
+	msg_add_len(msg);
+
+	if (add_msg_seq_number) {
+		if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (add_decision_algorithm) {
+		if (tlv_add_decision_algorithm(msg, decision_algorithm) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (add_heartbeat_interval) {
+		if (tlv_add_heartbeat_interval(msg, heartbeat_interval) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
+
+	return (dynar_size(msg));
+
+small_buf_err:
+	return (0);
+}
+
+size_t
+msg_create_set_option_reply(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number,
+    enum tlv_decision_algorithm_type decision_algorithm, uint32_t heartbeat_interval)
+{
+
+	dynar_clean(msg);
+
+	msg_add_type(msg, MSG_TYPE_SET_OPTION_REPLY);
+	msg_add_len(msg);
+
+	if (add_msg_seq_number) {
+		if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	if (tlv_add_decision_algorithm(msg, decision_algorithm) == -1) {
+		goto small_buf_err;
+	}
+
+	if (tlv_add_heartbeat_interval(msg, heartbeat_interval) == -1) {
+		goto small_buf_err;
+	}
+
+	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
+
+	return (dynar_size(msg));
+
+small_buf_err:
+	return (0);
+}
+
 int
 msg_is_valid_msg_type(const struct dynar *msg)
 {
@@ -491,6 +562,21 @@ msg_decode(const struct dynar *msg, struct msg_decoded *decoded_msg)
 			    &decoded_msg->no_supported_decision_algorithms)) != 0) {
 				return (res);
 			}
+			break;
+		case TLV_OPT_DECISION_ALGORITHM:
+			if (tlv_iter_decode_decision_algorithm(&tlv_iter, &decoded_msg->decision_algorithm) != 0) {
+				return (-1);
+			}
+
+			decoded_msg->decision_algorithm_set = 1;
+			break;
+		case TLV_OPT_HEARTBEAT_INTERVAL:
+			if (tlv_iter_decode_u32(&tlv_iter, &u32) != 0) {
+				return (-1);
+			}
+
+			decoded_msg->heartbeat_interval_set = 1;
+			decoded_msg->heartbeat_interval = u32;
 			break;
 		default:
 			/*

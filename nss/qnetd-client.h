@@ -31,6 +31,8 @@ struct qnetd_client {
 	size_t cluster_name_len;
 	uint8_t node_id_set;
 	uint32_t node_id;
+	enum tlv_decision_algorithm_type decision_algorithm;
+	uint32_t heartbeat_interval;
 	enum tlv_reply_error_code skipping_msg_reason;
 	TAILQ_ENTRY(qnetd_client) entries;
 };

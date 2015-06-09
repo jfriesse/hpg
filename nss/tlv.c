@@ -10,7 +10,7 @@
 #define TLV_TYPE_LENGTH		2
 #define TLV_LENGTH_LENGTH	2
 
-#define TLV_STATIC_SUPPORTED_OPTIONS_SIZE      11
+#define TLV_STATIC_SUPPORTED_OPTIONS_SIZE      13
 
 enum tlv_opt_type tlv_static_supported_options[TLV_STATIC_SUPPORTED_OPTIONS_SIZE] = {
     TLV_OPT_MSG_SEQ_NUMBER,
@@ -24,6 +24,8 @@ enum tlv_opt_type tlv_static_supported_options[TLV_STATIC_SUPPORTED_OPTIONS_SIZE
     TLV_OPT_SERVER_MAXIMUM_REPLY_SIZE,
     TLV_OPT_NODE_ID,
     TLV_OPT_SUPPORTED_DECISION_ALGORITHMS,
+    TLV_OPT_DECISION_ALGORITHM,
+    TLV_OPT_HEARTBEAT_INTERVAL,
 };
 
 int
@@ -208,6 +210,20 @@ tlv_add_node_id(struct dynar *msg, uint32_t node_id)
 {
 
 	return (tlv_add_u32(msg, TLV_OPT_NODE_ID, node_id));
+}
+
+int
+tlv_add_decision_algorithm(struct dynar *msg, enum tlv_decision_algorithm_type decision_algorithm)
+{
+
+	return (tlv_add_u16(msg, TLV_OPT_DECISION_ALGORITHM, (uint16_t)decision_algorithm));
+}
+
+int
+tlv_add_heartbeat_interval(struct dynar *msg, uint32_t heartbeat_interval)
+{
+
+	return (tlv_add_u32(msg, TLV_OPT_HEARTBEAT_INTERVAL, heartbeat_interval));
 }
 
 void
@@ -489,6 +505,20 @@ tlv_iter_decode_tls_supported(struct tlv_iterator *tlv_iter, enum tlv_tls_suppor
 	    *tls_supported != TLV_TLS_REQUIRED) {
 		return (-4);
 	}
+
+	return (0);
+}
+
+int
+tlv_iter_decode_decision_algorithm(struct tlv_iterator *tlv_iter, enum tlv_decision_algorithm_type *decision_algorithm)
+{
+	uint16_t u16;
+
+	if (tlv_iter_decode_u16(tlv_iter, &u16) != 0) {
+		return (-1);
+	}
+
+	*decision_algorithm = (enum tlv_decision_algorithm_type)u16;
 
 	return (0);
 }

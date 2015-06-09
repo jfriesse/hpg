@@ -43,6 +43,8 @@
 
 #define QDEVICE_NET_DECISION_ALGORITHM		TLV_DECISION_ALGORITHM_TYPE_TEST
 
+#define QDEVICE_NET_HEARTBEAT_INTERVAL		10000
+
 #define qdevice_net_log			qnetd_log
 #define qdevice_net_log_nss		qnetd_log_nss
 #define qdevice_net_log_init		qnetd_log_init
@@ -56,6 +58,7 @@ enum qdevice_net_state {
 	QDEVICE_NET_STATE_WAITING_PREINIT_REPLY,
 	QDEVICE_NET_STATE_WAITING_STARTTLS_BEING_SENT,
 	QDEVICE_NET_STATE_WAITING_INIT_REPLY,
+	QDEVICE_NET_STATE_WAITING_SET_OPTION_REPLY,
 };
 
 struct qdevice_net_instance {
@@ -75,6 +78,7 @@ struct qdevice_net_instance {
 	enum tlv_tls_supported tls_supported;
 	int using_tls;
 	uint32_t node_id;
+	uint32_t heartbeat_interval;
 	enum tlv_decision_algorithm_type decision_algorithm;
 };
 
@@ -190,6 +194,7 @@ qdevice_net_check_tls_compatibility(enum tlv_tls_supported server_tls, enum tlv_
 int
 qdevice_net_msg_received_preinit(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
 {
+
 	qdevice_net_log(LOG_ERR, "Received unexpected preinit message. Disconnecting from server");
 
 	return (-1);
@@ -198,6 +203,7 @@ qdevice_net_msg_received_preinit(struct qdevice_net_instance *instance, const st
 int
 qdevice_net_msg_check_seq_number(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
 {
+
 	if (!msg->seq_number_set || msg->seq_number != instance->expected_msg_seq_num) {
 		qdevice_net_log(LOG_ERR, "Received message doesn't contain seq_number or it's not expected one.");
 
@@ -370,7 +376,25 @@ qdevice_net_msg_received_init_reply(struct qdevice_net_instance *instance, const
 		return (-1);
 	}
 
+	/*
+	 * Send set options message
+	 */
 	instance->expected_msg_seq_num++;
+
+	if (msg_create_set_option(&instance->send_buffer, 1, instance->expected_msg_seq_num,
+	    1, instance->decision_algorithm, 1, instance->heartbeat_interval) == 0) {
+		qdevice_net_log(LOG_ERR, "Can't allocate send buffer for set option msg");
+
+		return (-1);
+	}
+
+	if (qdevice_net_schedule_send(instance) != 0) {
+		qdevice_net_log(LOG_ERR, "Can't schedule send of set option msg");
+
+		return (-1);
+	}
+
+	instance->state = QDEVICE_NET_STATE_WAITING_SET_OPTION_REPLY;
 
 	return (0);
 }
@@ -396,6 +420,34 @@ qdevice_net_msg_received_server_error(struct qdevice_net_instance *instance, con
 	}
 
 	return (-1);
+}
+
+int
+qdevice_net_msg_received_set_option(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+
+	qdevice_net_log(LOG_ERR, "Received unexpected set option message. Disconnecting from server");
+
+	return (-1);
+}
+
+int
+qdevice_net_msg_received_set_option_reply(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+
+	if (!msg->decision_algorithm_set || !msg->heartbeat_interval_set) {
+		qdevice_net_log(LOG_ERR, "Received set option reply message without required options. "
+		    "Disconnecting from server");
+	}
+
+	if (msg->decision_algorithm != instance->decision_algorithm ||
+	    msg->heartbeat_interval != instance->heartbeat_interval) {
+		qdevice_net_log(LOG_ERR, "Server doesn't accept sent decision algorithm or heartbeat interval.");
+
+		return (-1);
+	}
+
+	return (0);
 }
 
 int
@@ -435,6 +487,12 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 		break;
 	case MSG_TYPE_INIT_REPLY:
 		ret_val = qdevice_net_msg_received_init_reply(instance, &msg);
+		break;
+	case MSG_TYPE_SET_OPTION:
+		ret_val = qdevice_net_msg_received_set_option(instance, &msg);
+		break;
+	case MSG_TYPE_SET_OPTION_REPLY:
+		ret_val = qdevice_net_msg_received_set_option_reply(instance, &msg);
 		break;
 	default:
 		qdevice_net_log(LOG_ERR, "Received unsupported message %u. Disconnecting from server", msg.type);
@@ -661,11 +719,9 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 }
 
 int
-qdevice_net_instance_init(struct qdevice_net_instance *instance,
-    size_t initial_receive_size, size_t initial_send_size,
-    size_t min_send_size, size_t max_receive_size,
-    enum tlv_tls_supported tls_supported,
-    uint32_t node_id, enum tlv_decision_algorithm_type decision_algorithm)
+qdevice_net_instance_init(struct qdevice_net_instance *instance, size_t initial_receive_size,
+    size_t initial_send_size, size_t min_send_size, size_t max_receive_size, enum tlv_tls_supported tls_supported,
+    uint32_t node_id, enum tlv_decision_algorithm_type decision_algorithm, uint32_t heartbeat_interval)
 {
 
 	memset(instance, 0, sizeof(*instance));
@@ -676,6 +732,7 @@ qdevice_net_instance_init(struct qdevice_net_instance *instance,
 	instance->max_receive_size = max_receive_size;
 	instance->node_id = node_id;
 	instance->decision_algorithm = decision_algorithm;
+	instance->heartbeat_interval = heartbeat_interval;
 	dynar_init(&instance->receive_buffer, initial_receive_size);
 	dynar_init(&instance->send_buffer, initial_send_size);
 
@@ -712,7 +769,8 @@ main(void)
 	if (qdevice_net_instance_init(&instance,
 	    QDEVICE_NET_INITIAL_MSG_RECEIVE_SIZE, QDEVICE_NET_INITIAL_MSG_SEND_SIZE,
 	    QDEVICE_NET_MIN_MSG_SEND_SIZE, QDEVICE_NET_MAX_MSG_RECEIVE_SIZE,
-	    QDEVICE_NET_TLS_SUPPORTED, QDEVICE_NET_NODE_ID, QDEVICE_NET_DECISION_ALGORITHM) == -1) {
+	    QDEVICE_NET_TLS_SUPPORTED, QDEVICE_NET_NODE_ID, QDEVICE_NET_DECISION_ALGORITHM,
+	    QDEVICE_NET_HEARTBEAT_INTERVAL) == -1) {
 		errx(1, "Can't initialize qdevice-net");
 	}
 
