@@ -19,6 +19,7 @@
 #include "msg.h"
 #include "msgio.h"
 #include "qnetd-log.h"
+#include "timer-list.h"
 
 #define NSS_DB_DIR	"node/nssdb"
 
@@ -69,25 +70,25 @@ struct qdevice_net_instance {
 	size_t min_send_size;
 	struct dynar receive_buffer;
 	struct dynar send_buffer;
+	struct dynar echo_request_send_buffer;
 	int sending_msg;
 	int skipping_msg;
+	int sending_echo_request_msg;
 	size_t msg_already_received_bytes;
 	size_t msg_already_sent_bytes;
+	size_t echo_request_msg_already_sent_bytes;
 	enum qdevice_net_state state;
 	uint32_t expected_msg_seq_num;
+	uint32_t echo_request_expected_msg_seq_num;
+	uint32_t echo_reply_received_msg_seq_num;
 	enum tlv_tls_supported tls_supported;
 	int using_tls;
 	uint32_t node_id;
 	uint32_t heartbeat_interval;
 	enum tlv_decision_algorithm_type decision_algorithm;
-
-	/*
-	 * Echo request has extra buffer and extra processing
-	 */
-	int sending_echo_request_msg;
-	struct dynar echo_request_send_buffer;
-	size_t echo_request_msg_already_sent_bytes;
-	uint32_t echo_request_expected_msg_seq_num;
+	struct timer_list main_timer_list;
+	struct timer_list_entry *echo_request_timer;
+	int schedule_disconnect;
 };
 
 static void
@@ -143,6 +144,12 @@ qdevice_net_schedule_echo_request_send(struct qdevice_net_instance *instance)
 	if (instance->sending_echo_request_msg) {
 		qdevice_net_log(LOG_ERR, "Can't schedule send of echo request msg, because "
 		    "previous message wasn't yet sent. Disconnecting from server.");
+		return (-1);
+	}
+
+	if (instance->echo_reply_received_msg_seq_num != instance->echo_request_expected_msg_seq_num) {
+		qdevice_net_log(LOG_ERR, "Server didn't send echo reply message on time. "
+		    "Disconnecting from server.");
 		return (-1);
 	}
 
@@ -248,8 +255,14 @@ int
 qdevice_net_msg_check_echo_reply_seq_number(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
 {
 
-	if (!msg->seq_number_set || msg->seq_number != instance->echo_request_expected_msg_seq_num++) {
-		qdevice_net_log(LOG_ERR, "Received message doesn't contain seq_number or it's not expected one.");
+	if (!msg->seq_number_set) {
+		qdevice_net_log(LOG_ERR, "Received echo reply message doesn't contain seq_number.");
+
+		return (-1);
+	}
+
+	if (msg->seq_number != instance->echo_request_expected_msg_seq_num) {
+		qdevice_net_log(LOG_ERR, "Server doesn't replied in expected time. Closing connection");
 
 		return (-1);
 	}
@@ -476,6 +489,23 @@ qdevice_net_msg_received_set_option(struct qdevice_net_instance *instance, const
 	return (-1);
 }
 
+int qdevice_net_timer_send_heartbeat(void *data1, void *data2)
+{
+	struct qdevice_net_instance *instance;
+
+	instance = (struct qdevice_net_instance *)data1;
+
+	if (qdevice_net_schedule_echo_request_send(instance) == -1) {
+		instance->schedule_disconnect = 1;
+		return (0);
+	}
+
+	/*
+	 * Schedule this function callback again
+	 */
+	return (-1);
+}
+
 int
 qdevice_net_msg_received_set_option_reply(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
 {
@@ -496,6 +526,19 @@ qdevice_net_msg_received_set_option_reply(struct qdevice_net_instance *instance,
 		return (-1);
 	}
 
+	/*
+	 * Server accepted heartbeat interval -> schedule regular sending of echo request
+	 */
+	if (instance->heartbeat_interval > 0) {
+		instance->echo_request_timer = timer_list_add(&instance->main_timer_list, instance->heartbeat_interval,
+		    qdevice_net_timer_send_heartbeat, (void *)instance, NULL);
+
+		if (instance->echo_request_timer == NULL) {
+			qdevice_net_log(LOG_ERR, "Can't schedule regular sending of heartbeat.");
+
+			return (-1);
+		}
+	}
 
 	return (0);
 }
@@ -517,7 +560,7 @@ qdevice_net_msg_received_echo_reply(struct qdevice_net_instance *instance, const
 		return (-1);
 	}
 
-	qdevice_net_log(LOG_ERR, "Received echo reply %u", msg->seq_number);
+	instance->echo_reply_received_msg_seq_num = msg->seq_number;
 
 	return (0);
 }
@@ -700,7 +743,8 @@ qdevice_net_socket_write(struct qdevice_net_instance *instance)
 	int send_echo_request;
 
 	/*
-	 * Messages other then echo request has priority, but if echo request send was not completed
+	 * Echo request has extra buffer and special processing. Messages other then echo request
+	 * has higher priority, but if echo request send was not completed
 	 * it's necesary to complete it.
 	 */
 	send_echo_request = !(instance->sending_msg && instance->echo_request_msg_already_sent_bytes == 0);
@@ -751,7 +795,6 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 	PRPollDesc pfds[QDEVICE_NET_POLL_NO_FDS];
 	PRInt32 poll_res;
 	int i;
-	int schedule_disconnect;
 
 	pfds[QDEVICE_NET_POLL_SOCKET].fd = instance->socket;
 	pfds[QDEVICE_NET_POLL_SOCKET].in_flags = PR_POLL_READ;
@@ -759,15 +802,16 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 		pfds[QDEVICE_NET_POLL_SOCKET].in_flags |= PR_POLL_WRITE;
 	}
 
-	schedule_disconnect = 0;
+	instance->schedule_disconnect = 0;
 
-	if ((poll_res = PR_Poll(pfds, QDEVICE_NET_POLL_NO_FDS, PR_INTERVAL_NO_TIMEOUT)) > 0) {
+	if ((poll_res = PR_Poll(pfds, QDEVICE_NET_POLL_NO_FDS,
+	    timer_list_time_to_expire(&instance->main_timer_list))) > 0) {
 		for (i = 0; i < QDEVICE_NET_POLL_NO_FDS; i++) {
 			if (pfds[i].out_flags & PR_POLL_READ) {
 				switch (i) {
 				case QDEVICE_NET_POLL_SOCKET:
 					if (qdevice_net_socket_read(instance) == -1) {
-						schedule_disconnect = 1;
+						instance->schedule_disconnect = 1;
 					}
 
 					break;
@@ -777,11 +821,11 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 				}
 			}
 
-			if (!schedule_disconnect && pfds[i].out_flags & PR_POLL_WRITE) {
+			if (!instance->schedule_disconnect && pfds[i].out_flags & PR_POLL_WRITE) {
 				switch (i) {
 				case QDEVICE_NET_POLL_SOCKET:
 					if (qdevice_net_socket_write(instance) == -1) {
-						schedule_disconnect = 1;
+						instance->schedule_disconnect = 1;
 					}
 
 					break;
@@ -791,7 +835,7 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 				}
 			}
 
-			if (!schedule_disconnect &&
+			if (!instance->schedule_disconnect &&
 			    pfds[i].out_flags & (PR_POLL_ERR|PR_POLL_NVAL|PR_POLL_HUP|PR_POLL_EXCEPT)) {
 				switch (i) {
 				case QDEVICE_NET_POLL_SOCKET:
@@ -808,7 +852,14 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 		}
 	}
 
-	if (schedule_disconnect) {
+	if (!instance->schedule_disconnect) {
+		timer_list_expire(&instance->main_timer_list);
+	}
+
+	if (instance->schedule_disconnect) {
+		/*
+		 * Schedule disconnect can be set by this function or by some timer_list callback
+		 */
 		return (-1);
 	}
 
@@ -833,6 +884,7 @@ qdevice_net_instance_init(struct qdevice_net_instance *instance, size_t initial_
 	dynar_init(&instance->receive_buffer, initial_receive_size);
 	dynar_init(&instance->send_buffer, initial_send_size);
 	dynar_init(&instance->echo_request_send_buffer, initial_send_size);
+	timer_list_init(&instance->main_timer_list);
 
 	instance->tls_supported = tls_supported;
 
@@ -843,6 +895,7 @@ int
 qdevice_net_instance_destroy(struct qdevice_net_instance *instance)
 {
 
+	timer_list_free(&instance->main_timer_list);
 	dynar_destroy(&instance->receive_buffer);
 	dynar_destroy(&instance->send_buffer);
 	dynar_destroy(&instance->echo_request_send_buffer);
