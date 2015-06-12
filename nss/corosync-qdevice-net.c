@@ -80,6 +80,14 @@ struct qdevice_net_instance {
 	uint32_t node_id;
 	uint32_t heartbeat_interval;
 	enum tlv_decision_algorithm_type decision_algorithm;
+
+	/*
+	 * Echo request has extra buffer and extra processing
+	 */
+	int sending_echo_request_msg;
+	struct dynar echo_request_send_buffer;
+	size_t echo_request_msg_already_sent_bytes;
+	uint32_t echo_request_expected_msg_seq_num;
 };
 
 static void
@@ -125,6 +133,29 @@ qdevice_net_schedule_send(struct qdevice_net_instance *instance)
 
 	instance->msg_already_sent_bytes = 0;
 	instance->sending_msg = 1;
+
+	return (0);
+}
+
+int
+qdevice_net_schedule_echo_request_send(struct qdevice_net_instance *instance)
+{
+	if (instance->sending_echo_request_msg) {
+		qdevice_net_log(LOG_ERR, "Can't schedule send of echo request msg, because "
+		    "previous message wasn't yet sent. Disconnecting from server.");
+		return (-1);
+	}
+
+	instance->echo_request_expected_msg_seq_num++;
+
+	if (msg_create_echo_request(&instance->echo_request_send_buffer, 1, instance->echo_request_expected_msg_seq_num) == -1) {
+		qdevice_net_log(LOG_ERR, "Can't allocate send buffer for echo request msg");
+
+		return (-1);
+	}
+
+	instance->echo_request_msg_already_sent_bytes = 0;
+	instance->sending_echo_request_msg = 1;
 
 	return (0);
 }
@@ -205,6 +236,19 @@ qdevice_net_msg_check_seq_number(struct qdevice_net_instance *instance, const st
 {
 
 	if (!msg->seq_number_set || msg->seq_number != instance->expected_msg_seq_num) {
+		qdevice_net_log(LOG_ERR, "Received message doesn't contain seq_number or it's not expected one.");
+
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+qdevice_net_msg_check_echo_reply_seq_number(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+
+	if (!msg->seq_number_set || msg->seq_number != instance->echo_request_expected_msg_seq_num++) {
 		qdevice_net_log(LOG_ERR, "Received message doesn't contain seq_number or it's not expected one.");
 
 		return (-1);
@@ -357,6 +401,7 @@ qdevice_net_msg_received_init_reply(struct qdevice_net_instance *instance, const
 	 */
 	dynar_set_max_size(&instance->receive_buffer, msg->server_maximum_reply_size);
 	dynar_set_max_size(&instance->send_buffer, msg->server_maximum_request_size);
+	dynar_set_max_size(&instance->echo_request_send_buffer, msg->server_maximum_request_size);
 
 
 	/*
@@ -451,19 +496,6 @@ qdevice_net_msg_received_set_option_reply(struct qdevice_net_instance *instance,
 		return (-1);
 	}
 
-	instance->expected_msg_seq_num++;
-
-	if (msg_create_echo_request(&instance->send_buffer, 1, instance->expected_msg_seq_num) == -1) {
-		qdevice_net_log(LOG_ERR, "Can't allocate send buffer for echo request msg");
-
-		return (-1);
-	}
-
-	if (qdevice_net_schedule_send(instance) != 0) {
-		qdevice_net_log(LOG_ERR, "Can't schedule send of echo request msg");
-
-		return (-1);
-	}
 
 	return (0);
 }
@@ -481,11 +513,11 @@ int
 qdevice_net_msg_received_echo_reply(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
 {
 
-	if (qdevice_net_msg_check_seq_number(instance, msg) != 0) {
+	if (qdevice_net_msg_check_echo_reply_seq_number(instance, msg) != 0) {
 		return (-1);
 	}
 
-	qdevice_net_log(LOG_ERR, "Received echo reply");
+	qdevice_net_log(LOG_ERR, "Received echo reply %u", msg->seq_number);
 
 	return (0);
 }
@@ -665,14 +697,32 @@ int
 qdevice_net_socket_write(struct qdevice_net_instance *instance)
 {
 	int res;
+	int send_echo_request;
 
-	res = msgio_write(instance->socket, &instance->send_buffer, &instance->msg_already_sent_bytes);
+	/*
+	 * Messages other then echo request has priority, but if echo request send was not completed
+	 * it's necesary to complete it.
+	 */
+	send_echo_request = !(instance->sending_msg && instance->echo_request_msg_already_sent_bytes == 0);
+	// TODO
+	fprintf(stderr,"qdevice_net_socket_write = %u %u %zu %zu = %u\n", instance->sending_msg, instance->sending_echo_request_msg, instance->msg_already_sent_bytes, instance->echo_request_msg_already_sent_bytes, send_echo_request);
+
+	if (!send_echo_request) {
+		res = msgio_write(instance->socket, &instance->send_buffer, &instance->msg_already_sent_bytes);
+	} else {
+		res = msgio_write(instance->socket, &instance->echo_request_send_buffer,
+		    &instance->echo_request_msg_already_sent_bytes);
+	}
 
 	if (res == 1) {
-		instance->sending_msg = 0;
+		if (!send_echo_request) {
+			instance->sending_msg = 0;
 
-		if (qdevice_net_socket_write_finished(instance) == -1) {
-			return (-1);
+			if (qdevice_net_socket_write_finished(instance) == -1) {
+				return (-1);
+			}
+		} else {
+			instance->sending_echo_request_msg = 0;
 		}
 	}
 
@@ -705,7 +755,7 @@ qdevice_net_poll(struct qdevice_net_instance *instance)
 
 	pfds[QDEVICE_NET_POLL_SOCKET].fd = instance->socket;
 	pfds[QDEVICE_NET_POLL_SOCKET].in_flags = PR_POLL_READ;
-	if (instance->sending_msg) {
+	if (instance->sending_msg || instance->sending_echo_request_msg) {
 		pfds[QDEVICE_NET_POLL_SOCKET].in_flags |= PR_POLL_WRITE;
 	}
 
@@ -782,6 +832,7 @@ qdevice_net_instance_init(struct qdevice_net_instance *instance, size_t initial_
 	instance->heartbeat_interval = heartbeat_interval;
 	dynar_init(&instance->receive_buffer, initial_receive_size);
 	dynar_init(&instance->send_buffer, initial_send_size);
+	dynar_init(&instance->echo_request_send_buffer, initial_send_size);
 
 	instance->tls_supported = tls_supported;
 
@@ -794,6 +845,7 @@ qdevice_net_instance_destroy(struct qdevice_net_instance *instance)
 
 	dynar_destroy(&instance->receive_buffer);
 	dynar_destroy(&instance->send_buffer);
+	dynar_destroy(&instance->echo_request_send_buffer);
 
 	return (0);
 }
