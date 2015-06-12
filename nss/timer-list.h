@@ -23,18 +23,22 @@ struct timer_list_entry {
 struct timer_list {
 	TAILQ_HEAD(, timer_list_entry) list;
 	TAILQ_HEAD(, timer_list_entry) free_list;
+	int list_expire_in_progress;
 };
 
-extern void		timer_list_init(struct timer_list *tlist);
+extern void				 timer_list_init(struct timer_list *tlist);
 
-extern int		timer_list_add(struct timer_list *tlist, PRUint32 interval,
-	timer_list_cb_fn func, void *data1, void *data2);
+extern struct timer_list_entry		*timer_list_add(struct timer_list *tlist, PRUint32 interval,
+    timer_list_cb_fn func, void *data1, void *data2);
 
-extern void		timer_list_expire(struct timer_list *tlist);
+extern void				 timer_list_delete(struct timer_list *tlist,
+    struct timer_list_entry *entry);
 
-extern PRIntervalTime	timer_list_time_to_expire(struct timer_list *tlist);
+extern void				 timer_list_expire(struct timer_list *tlist);
 
-extern void		timer_list_free(struct timer_list *tlist);
+extern PRIntervalTime			 timer_list_time_to_expire(struct timer_list *tlist);
+
+extern void				 timer_list_free(struct timer_list *tlist);
 
 #ifdef __cplusplus
 }

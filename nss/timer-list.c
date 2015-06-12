@@ -1,4 +1,5 @@
 #include <string.h>
+#include <assert.h>
 
 #include "timer-list.h"
 
@@ -12,13 +13,15 @@ timer_list_init(struct timer_list *tlist)
 	TAILQ_INIT(&tlist->free_list);
 }
 
-int
+struct timer_list_entry *
 timer_list_add(struct timer_list *tlist, PRUint32 interval, timer_list_cb_fn func, void *data1, void *data2)
 {
 	struct timer_list_entry *entry;
 
+	assert(tlist->list_expire_in_progress == 0);
+
 	if (interval > (0xffffffffUL / 4)) {
-		return (-1);
+		return (NULL);
 	}
 
 	if (!TAILQ_EMPTY(&tlist->free_list)) {
@@ -33,7 +36,7 @@ timer_list_add(struct timer_list *tlist, PRUint32 interval, timer_list_cb_fn fun
 		 */
 		entry = malloc(sizeof(*entry));
 		if (entry == NULL) {
-			return (-1);
+			return (NULL);
 		}
 	}
 
@@ -45,7 +48,7 @@ timer_list_add(struct timer_list *tlist, PRUint32 interval, timer_list_cb_fn fun
 	entry->user_data2 = data2;
 	TAILQ_INSERT_TAIL(&tlist->list, entry, entries);
 
-	return (0);
+	return (entry);
 }
 
 void
@@ -56,6 +59,8 @@ timer_list_expire(struct timer_list *tlist)
 	struct timer_list_entry *entry_next;
 	PRUint32 delta;
 	int res;
+
+	tlist->list_expire_in_progress = 1;
 
 	now = PR_IntervalNow();
 
@@ -86,6 +91,8 @@ timer_list_expire(struct timer_list *tlist)
 
 		entry = entry_next;
 	}
+
+	tlist->list_expire_in_progress = 0;
 }
 
 PRIntervalTime
@@ -129,6 +136,19 @@ timer_list_time_to_expire(struct timer_list *tlist)
 	}
 
 	return (PR_MillisecondsToInterval(min_timeout));
+}
+
+void
+timer_list_delete(struct timer_list *tlist, struct timer_list_entry *entry)
+{
+
+	assert(tlist->list_expire_in_progress == 0);
+
+	/*
+	 * Move item to free list
+	 */
+	TAILQ_REMOVE(&tlist->list, entry, entries);
+	TAILQ_INSERT_HEAD(&tlist->free_list, entry, entries);
 }
 
 void
