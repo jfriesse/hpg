@@ -20,6 +20,8 @@ enum msg_type {
 	MSG_TYPE_SERVER_ERROR = 5,
 	MSG_TYPE_SET_OPTION = 6,
 	MSG_TYPE_SET_OPTION_REPLY = 7,
+	MSG_TYPE_ECHO_REQUEST = 8,
+	MSG_TYPE_ECHO_REPLY = 9,
 };
 
 struct msg_decoded {
@@ -82,6 +84,10 @@ extern size_t		msg_create_set_option(struct dynar *msg,
 extern size_t		msg_create_set_option_reply(struct dynar *msg,
     int add_msg_seq_number, uint32_t msg_seq_number,
     enum tlv_decision_algorithm_type decision_algorithm, uint32_t heartbeat_interval);
+
+extern size_t		msg_create_echo_request(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number);
+
+extern size_t		msg_create_echo_reply(struct dynar *msg, const struct dynar *echo_request_msg);
 
 extern size_t		msg_get_header_length(void);
 

@@ -10,7 +10,7 @@
 #define MSG_TYPE_LENGTH		2
 #define MSG_LENGTH_LENGTH	4
 
-#define MSG_STATIC_SUPPORTED_MESSAGES_SIZE	8
+#define MSG_STATIC_SUPPORTED_MESSAGES_SIZE	10
 
 enum msg_type msg_static_supported_messages[MSG_STATIC_SUPPORTED_MESSAGES_SIZE] = {
     MSG_TYPE_PREINIT,
@@ -21,6 +21,8 @@ enum msg_type msg_static_supported_messages[MSG_STATIC_SUPPORTED_MESSAGES_SIZE] 
     MSG_TYPE_SERVER_ERROR,
     MSG_TYPE_SET_OPTION,
     MSG_TYPE_SET_OPTION_REPLY,
+    MSG_TYPE_ECHO_REQUEST,
+    MSG_TYPE_ECHO_REPLY,
 };
 
 size_t
@@ -70,6 +72,18 @@ msg_set_len(struct dynar *msg, uint32_t len)
 
 	nlen = htonl(len);
 	memcpy(dynar_data(msg) + MSG_TYPE_LENGTH, &nlen, sizeof(nlen));
+}
+
+/*
+ * Used only for echo reply msg. All other messages should use msg_add_type.
+ */
+static void
+msg_set_type(struct dynar *msg, enum msg_type type)
+{
+	uint16_t ntype;
+
+	ntype = htons((uint16_t)type);
+	memcpy(dynar_data(msg), &ntype, sizeof(ntype));
 }
 
 uint32_t
@@ -398,6 +412,47 @@ msg_create_set_option_reply(struct dynar *msg, int add_msg_seq_number, uint32_t 
 	}
 
 	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
+
+	return (dynar_size(msg));
+
+small_buf_err:
+	return (0);
+}
+
+size_t
+msg_create_echo_request(struct dynar *msg, int add_msg_seq_number, uint32_t msg_seq_number)
+{
+
+	dynar_clean(msg);
+
+	msg_add_type(msg, MSG_TYPE_ECHO_REQUEST);
+	msg_add_len(msg);
+
+	if (add_msg_seq_number) {
+		if (tlv_add_msg_seq_number(msg, msg_seq_number) == -1) {
+			goto small_buf_err;
+		}
+	}
+
+	msg_set_len(msg, dynar_size(msg) - (MSG_TYPE_LENGTH + MSG_LENGTH_LENGTH));
+
+	return (dynar_size(msg));
+
+small_buf_err:
+	return (0);
+}
+
+size_t
+msg_create_echo_reply(struct dynar *msg, const struct dynar *echo_request_msg)
+{
+
+	dynar_clean(msg);
+
+	if (dynar_cat(msg, dynar_data(echo_request_msg), dynar_size(echo_request_msg)) == -1) {
+		goto small_buf_err;
+	}
+
+	msg_set_type(msg, MSG_TYPE_ECHO_REPLY);
 
 	return (dynar_size(msg));
 

@@ -534,6 +534,56 @@ qnetd_client_msg_received_set_option(struct qnetd_instance *instance, struct qne
 }
 
 int
+qnetd_client_msg_received_echo_reply(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg)
+{
+	qnetd_log(LOG_ERR, "Received echo reply. Sending back error message");
+
+	if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+	    TLV_REPLY_ERROR_CODE_UNEXPECTED_MESSAGE) != 0) {
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+qnetd_client_msg_received_echo_request(struct qnetd_instance *instance, struct qnetd_client *client,
+	const struct msg_decoded *msg, const struct dynar *msg_orig)
+{
+	int res;
+
+	if ((res = qnetd_client_check_tls(instance, client, msg)) != 0) {
+		return (res == -1 ? -1 : 0);
+	}
+
+	if (!client->init_received) {
+		qnetd_log(LOG_ERR, "Received echo request before init message. Sending error reply.");
+
+		if (qnetd_client_send_err(client, msg->seq_number_set, msg->seq_number,
+		    TLV_REPLY_ERROR_CODE_INIT_REQUIRED) != 0) {
+			return (-1);
+		}
+
+		return (0);
+	}
+
+	if (msg_create_echo_reply(&client->send_buffer, msg_orig) == -1) {
+		qnetd_log(LOG_ERR, "Can't alloc echo reply msg. Disconnecting client connection.");
+
+		return (-1);
+	}
+
+	if (qnetd_client_net_schedule_send(client) != 0) {
+		qnetd_log(LOG_ERR, "Can't schedule send of echo reply message. Disconnecting client connection.");
+
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
 qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *client)
 {
 	struct msg_decoded msg;
@@ -584,6 +634,12 @@ qnetd_client_msg_received(struct qnetd_instance *instance, struct qnetd_client *
 		break;
 	case MSG_TYPE_SET_OPTION_REPLY:
 		ret_val = qnetd_client_msg_received_set_option_reply(instance, client, &msg);
+		break;
+	case MSG_TYPE_ECHO_REQUEST:
+		ret_val = qnetd_client_msg_received_echo_request(instance, client, &msg, &client->receive_buffer);
+		break;
+	case MSG_TYPE_ECHO_REPLY:
+		ret_val = qnetd_client_msg_received_echo_reply(instance, client, &msg);
 		break;
 	default:
 		qnetd_log(LOG_ERR, "Unsupported message %u received from client. Sending back error message",

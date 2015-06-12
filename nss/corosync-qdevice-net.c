@@ -435,6 +435,10 @@ int
 qdevice_net_msg_received_set_option_reply(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
 {
 
+	if (qdevice_net_msg_check_seq_number(instance, msg) != 0) {
+		return (-1);
+	}
+
 	if (!msg->decision_algorithm_set || !msg->heartbeat_interval_set) {
 		qdevice_net_log(LOG_ERR, "Received set option reply message without required options. "
 		    "Disconnecting from server");
@@ -447,8 +451,45 @@ qdevice_net_msg_received_set_option_reply(struct qdevice_net_instance *instance,
 		return (-1);
 	}
 
+	instance->expected_msg_seq_num++;
+
+	if (msg_create_echo_request(&instance->send_buffer, 1, instance->expected_msg_seq_num) == -1) {
+		qdevice_net_log(LOG_ERR, "Can't allocate send buffer for echo request msg");
+
+		return (-1);
+	}
+
+	if (qdevice_net_schedule_send(instance) != 0) {
+		qdevice_net_log(LOG_ERR, "Can't schedule send of echo request msg");
+
+		return (-1);
+	}
+
 	return (0);
 }
+
+int
+qdevice_net_msg_received_echo_request(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+
+	qdevice_net_log(LOG_ERR, "Received unexpected echo request message. Disconnecting from server");
+
+	return (-1);
+}
+
+int
+qdevice_net_msg_received_echo_reply(struct qdevice_net_instance *instance, const struct msg_decoded *msg)
+{
+
+	if (qdevice_net_msg_check_seq_number(instance, msg) != 0) {
+		return (-1);
+	}
+
+	qdevice_net_log(LOG_ERR, "Received echo reply");
+
+	return (0);
+}
+
 
 int
 qdevice_net_msg_received(struct qdevice_net_instance *instance)
@@ -493,6 +534,12 @@ qdevice_net_msg_received(struct qdevice_net_instance *instance)
 		break;
 	case MSG_TYPE_SET_OPTION_REPLY:
 		ret_val = qdevice_net_msg_received_set_option_reply(instance, &msg);
+		break;
+	case MSG_TYPE_ECHO_REQUEST:
+		ret_val = qdevice_net_msg_received_echo_request(instance, &msg);
+		break;
+	case MSG_TYPE_ECHO_REPLY:
+		ret_val = qdevice_net_msg_received_echo_reply(instance, &msg);
 		break;
 	default:
 		qdevice_net_log(LOG_ERR, "Received unsupported message %u. Disconnecting from server", msg.type);
