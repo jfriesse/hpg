@@ -748,8 +748,6 @@ qdevice_net_socket_write(struct qdevice_net_instance *instance)
 	 * it's necesary to complete it.
 	 */
 	send_echo_request = !(instance->sending_msg && instance->echo_request_msg_already_sent_bytes == 0);
-	// TODO
-	fprintf(stderr,"qdevice_net_socket_write = %u %u %zu %zu = %u\n", instance->sending_msg, instance->sending_echo_request_msg, instance->msg_already_sent_bytes, instance->echo_request_msg_already_sent_bytes, send_echo_request);
 
 	if (!send_echo_request) {
 		res = msgio_write(instance->socket, &instance->send_buffer, &instance->msg_already_sent_bytes);
