@@ -1,1 +1,2 @@
-Multiple tags: ref names: (HEAD -> master, tag: v1.12.12, tag: v1.1.0)
+Multiple tags + head: ref names: (HEAD -> master, tag: v1.12.12, tag: v1.1.0)
+Multiple tags: ref names: (tag: v1.12.12, tag: v1.1.0)
