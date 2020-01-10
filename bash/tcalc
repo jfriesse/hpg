@@ -1,0 +1,43 @@
+#!/bin/bash
+
+err() {
+    echo "$1" >&2
+}
+
+tcalc() {
+    tmp="${1// /}" # Remove spaces
+
+    if ! [[ "$tmp" =~ ^[0-9:+-]*$ ]];then
+        err "Bad expression"
+        return 1
+    fi
+
+    if [ "${tmp:0:1}" == "-" ];then
+        tmp="0$tmp"
+    fi
+
+    tmp="($tmp)"
+    tmp="${tmp//-/)-(}"
+    tmp="${tmp//+/)+(}"
+    tmp="${tmp//:/*60+}"
+
+    tmp="${tmp//(0/(10#0}"
+    tmp="${tmp//+0/+10#0}"
+    res="$((tmp))"
+
+    pref=""
+    if [ "$res" -lt 0 ];then
+        pref="-"
+        res="$((-$res))"
+    fi
+
+    h="$((res/60))"
+    m="$((res%60))"
+
+    printf "%s%02u:%02u\n" "$pref" "$h" "$m"
+}
+
+while read -e line;do
+    tcalc "$line"
+    history -s -- "$line"
+done
